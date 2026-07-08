@@ -135,9 +135,9 @@ export default function NewsJournal() {
     })();
   }, []);
 
-  function showToast(msg) {
+  function showToast(msg, duration = 2600) {
     setToast(msg);
-    setTimeout(() => setToast(null), 2600);
+    setTimeout(() => setToast(null), duration);
   }
 
   async function persist(newEntries) {
@@ -209,15 +209,23 @@ export default function NewsJournal() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: entry.url || "", text: bulletText }),
       });
-      if (!res.ok) throw new Error("request failed");
-      const data = await res.json();
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        throw new Error(`서버 응답을 읽을 수 없어요 (status ${res.status})`);
+      }
+      if (!res.ok) {
+        const reason = data && (data.error || data.detail) ? `${data.error || ""} ${data.detail || ""}`.trim() : `status ${res.status}`;
+        throw new Error(reason);
+      }
       if (data.summary) {
         patchEntry(entry.id, { oneLiner: data.summary });
       } else {
-        throw new Error("no summary");
+        throw new Error("요약 결과가 비어 있어요.");
       }
     } catch (e) {
-      showToast("AI 요약 생성에 실패했어요. Cloudflare 설정을 확인해주세요.");
+      showToast(`AI 요약 실패: ${String(e.message || e).slice(0, 160)}`, 9000);
     } finally {
       setSummarizing((s) => {
         const next = { ...s };
@@ -515,7 +523,7 @@ export default function NewsJournal() {
 
         .nj-toast {
           position: fixed; bottom: 22px; right: 22px; background: var(--surface-raised); border: 1px solid var(--teal); color: var(--text);
-          padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 70; max-width: 280px;
+          padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 70; max-width: 380px; line-height: 1.5;
           animation: nj-fade-in .2s ease; box-shadow: 0 0 20px rgba(45,212,191,0.15);
         }
         .nj-copy-fallback {
