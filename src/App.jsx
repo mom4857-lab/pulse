@@ -150,6 +150,20 @@ export default function NewsJournal() {
     }
   }
 
+  // Safely merges a patch into an entry using the latest state at write time,
+  // rather than whatever `entries` looked like when the async call started.
+  // This avoids clobbering newer saves that happened while an await (like the
+  // AI summary fetch) was in flight.
+  function patchEntry(id, patch) {
+    setEntries((prev) => {
+      const updated = prev.map((e) => (e.id === id ? { ...e, ...patch } : e));
+      storage.set(STORAGE_KEY, JSON.stringify(updated)).then((ok) => {
+        if (!ok) showToast("저장에 실패했어요. 다시 시도해주세요.");
+      }).catch(() => showToast("저장 중 오류가 발생했어요."));
+      return updated;
+    });
+  }
+
   function resetForm() {
     setEditingId(null);
     setFUrl("");
@@ -198,8 +212,7 @@ export default function NewsJournal() {
       if (!res.ok) throw new Error("request failed");
       const data = await res.json();
       if (data.summary) {
-        const updated = entries.map((e) => (e.id === entry.id ? { ...e, oneLiner: data.summary } : e));
-        persist(updated);
+        patchEntry(entry.id, { oneLiner: data.summary });
       } else {
         throw new Error("no summary");
       }
