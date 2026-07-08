@@ -439,8 +439,8 @@ export default function NewsJournal() {
           padding: 14px 16px; margin-bottom: 10px; transition: border-color .15s ease;
         }
         .nj-entry:hover { border-color: rgba(45,212,191,0.35); }
-        .nj-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-        .nj-entry-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-soft); white-space: nowrap; }
+        .nj-entry-top { display: flex; flex-direction: column; gap: 3px; }
+        .nj-entry-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-soft); }
         .nj-entry-title { font-weight: 600; font-size: 14.5px; color: var(--teal); text-decoration: none; }
         .nj-entry-title:hover { text-decoration: underline; }
         .nj-entry-summary { margin: 8px 0; }
@@ -643,7 +643,6 @@ export default function NewsJournal() {
           displayedEntries.map((e) => (
             <div className="nj-entry" key={e.id}>
               <div className="nj-entry-top">
-                <span className="nj-entry-date">{e.date}</span>
                 {e.url ? (
                   <a className="nj-entry-title" href={e.url} target="_blank" rel="noopener noreferrer">
                     {e.title} ↗
@@ -653,6 +652,7 @@ export default function NewsJournal() {
                     {e.title}
                   </span>
                 )}
+                <span className="nj-entry-date">{e.date}</span>
               </div>
               <div className="nj-entry-summary">
                 {parseSummaryLines(e.summary).map((line, i) => (
