@@ -64,15 +64,25 @@ async function handleSummarize(request, env) {
     sourceType === "article"
       ? "다음은 한 뉴스 기사 페이지에서 추출한 본문 텍스트다. 이 기사의 핵심 내용을 한국어 2~3줄로, 완결된 문장으로 요약해줘. " +
         "원문 문장을 그대로 옮기지 말고 핵심만 너의 표현으로 정리해줘. " +
-        "그리고 이 기사와 관련된 산업군/섹터 키워드(최대 3개)와 관련 기업명·기술명 키워드(최대 4개)도 뽑아줘."
+        "그리고 이 기사의 밸류체인과 시장 상황을 전반적으로 분석해서, 실제로 연관성이 높은 키워드를 총 5개 이내로 추천해줘: " +
+        "(1) 산업군/섹터 키워드 최대 2개. " +
+        "(2) 관련 키워드 최대 3개 — 기업명, 기술명, 제품·소재명 중 무엇이든 될 수 있다. " +
+        "기사에 직접 언급되지 않았더라도, 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 수요나 실적에 실질적으로 영향을 받을 만한 항목이면 포함해라. " +
+        "예를 들어 HBM 수요 확대 기사라면 관련 패키징 기판(FC-BGA)이나 후공정 장비처럼 함께 움직일 만한 항목도 추천 대상이다. " +
+        "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명에는 이 제한이 없다."
       : "다음은 한 개인 투자자가 직접 읽고 정리한 뉴스 기록의 요점들이다. 이 내용을 핵심만 담아 한국어 2~3줄로, 완결된 문장으로 요약해줘. " +
-        "그리고 이 내용과 관련된 산업군/섹터 키워드(최대 3개)와 관련 기업명·기술명 키워드(최대 4개)도 뽑아줘.";
+        "그리고 이 내용의 밸류체인과 시장 상황을 전반적으로 분석해서, 실제로 연관성이 높은 키워드를 총 5개 이내로 추천해줘: " +
+        "(1) 산업군/섹터 키워드 최대 2개. " +
+        "(2) 관련 키워드 최대 3개 — 기업명, 기술명, 제품·소재명 중 무엇이든 될 수 있다. " +
+        "직접 언급되지 않았더라도, 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 수요나 실적에 실질적으로 영향을 받을 만한 항목이면 포함해라. " +
+        "예를 들어 HBM 수요 확대 내용이라면 관련 패키징 기판(FC-BGA)이나 후공정 장비처럼 함께 움직일 만한 항목도 추천 대상이다. " +
+        "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명에는 이 제한이 없다.";
 
   const jsonInstruction =
     '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해.\n' +
     '{"summary": "한국어 2~3줄 요약, 줄 사이는 \\n로 구분, 번호나 기호 없이 완결된 문장", ' +
-    '"industryKeywords": ["산업군/섹터 키워드", "..."], ' +
-    '"stockKeywords": ["기업명/기술명 키워드", "..."]}';
+    '"industryKeywords": ["산업군/섹터 키워드 (최대 2개)"], ' +
+    '"stockKeywords": ["관련 기업(상장사)/기술/제품 키워드 (최대 3개)"]}';
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -121,8 +131,8 @@ async function handleSummarize(request, env) {
 
     return json({
       summary: (parsed.summary || rawText).toString(),
-      industryKeywords: Array.isArray(parsed.industryKeywords) ? parsed.industryKeywords.slice(0, 5) : [],
-      stockKeywords: Array.isArray(parsed.stockKeywords) ? parsed.stockKeywords.slice(0, 5) : [],
+      industryKeywords: Array.isArray(parsed.industryKeywords) ? parsed.industryKeywords.slice(0, 2) : [],
+      stockKeywords: Array.isArray(parsed.stockKeywords) ? parsed.stockKeywords.slice(0, 3) : [],
       source: sourceType,
     });
   } catch (e) {

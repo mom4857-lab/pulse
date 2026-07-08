@@ -175,12 +175,22 @@ export default function NewsJournal() {
     patchEntry(entryId, (e) => {
       const current = e[field] || [];
       const alreadyThere = current.some((t) => t.toLowerCase() === keyword.toLowerCase());
+      const aiAdded = e.aiAddedTags || [];
       return {
         [field]: alreadyThere ? current : [...current, keyword],
         [suggestField]: (e[suggestField] || []).filter((k) => k !== keyword),
+        aiAddedTags: aiAdded.includes(keyword) ? aiAdded : [...aiAdded, keyword],
       };
     });
     showToast(`#${keyword} 키워드를 추가했어요.`);
+  }
+
+  function removeEntryTag(entryId, tag, category) {
+    const field = category === "industry" ? "industryTags" : "stockTags";
+    patchEntry(entryId, (e) => ({
+      [field]: (e[field] || []).filter((t) => t !== tag),
+      aiAddedTags: (e.aiAddedTags || []).filter((t) => t !== tag),
+    }));
   }
 
   function resetForm() {
@@ -314,7 +324,7 @@ export default function NewsJournal() {
   const periodEntries = entries.filter((e) => isInPeriod(e.date, periodType, refDate));
   const displayedEntries = (selectedTag
     ? periodEntries.filter((e) =>
-        (category === "industry" ? e.industryTags : e.stockTags || []).includes(selectedTag)
+        (category === "industry" ? e.industryTags || [] : e.stockTags || []).includes(selectedTag)
       )
     : periodEntries
   )
@@ -394,6 +404,7 @@ export default function NewsJournal() {
           --teal: #2dd4bf;
           --violet: #a78bfa;
           --rose: #fb7185;
+          --gold: #f2b84b;
           font-family: 'Inter', sans-serif;
           color: var(--text);
           background: var(--bg);
@@ -514,9 +525,18 @@ export default function NewsJournal() {
         }
         .nj-kw-add-btn:hover { background: currentColor; color: var(--bg); }
         .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
-        .nj-chip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; }
+        .nj-chip {
+          display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 5px 2px 9px;
+          border-radius: 999px; font-family: 'JetBrains Mono', monospace;
+        }
         .nj-chip.industry { background: rgba(45,212,191,0.12); color: var(--teal); }
         .nj-chip.stock { background: rgba(167,139,250,0.14); color: var(--violet); }
+        .nj-chip.ai-added { background: rgba(242,184,75,0.16); color: var(--gold); }
+        .nj-chip-remove {
+          border: none; background: none; color: inherit; opacity: 0.55; cursor: pointer;
+          display: flex; align-items: center; padding: 0; transition: opacity .15s ease, color .15s ease;
+        }
+        .nj-chip-remove:hover { opacity: 1; color: var(--rose); }
         .nj-entry-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
         .nj-entry-actions button { font-size: 11.5px; border: none; background: none; color: var(--text-soft); cursor: pointer; }
         .nj-entry-actions button:hover { color: var(--rose); }
@@ -718,13 +738,33 @@ export default function NewsJournal() {
               </div>
               <div className="nj-entry-tags">
                 {(e.industryTags || []).map((t) => (
-                  <span key={"i" + t} className="nj-chip industry">
+                  <span
+                    key={"i" + t}
+                    className={`nj-chip industry${(e.aiAddedTags || []).includes(t) ? " ai-added" : ""}`}
+                  >
                     #{t}
+                    <button
+                      className="nj-chip-remove"
+                      title="키워드 삭제"
+                      onClick={() => removeEntryTag(e.id, t, "industry")}
+                    >
+                      <X size={10} />
+                    </button>
                   </span>
                 ))}
                 {(e.stockTags || []).map((t) => (
-                  <span key={"s" + t} className="nj-chip stock">
+                  <span
+                    key={"s" + t}
+                    className={`nj-chip stock${(e.aiAddedTags || []).includes(t) ? " ai-added" : ""}`}
+                  >
                     #{t}
+                    <button
+                      className="nj-chip-remove"
+                      title="키워드 삭제"
+                      onClick={() => removeEntryTag(e.id, t, "stock")}
+                    >
+                      <X size={10} />
+                    </button>
                   </span>
                 ))}
               </div>
