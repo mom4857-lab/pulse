@@ -116,7 +116,6 @@ export default function NewsJournal() {
   const [fUrl, setFUrl] = useState("");
   const [fTitle, setFTitle] = useState("");
   const [fDate, setFDate] = useState(todayStr());
-  const [fFetching, setFFetching] = useState(false);
   const [fIndustryInput, setFIndustryInput] = useState("");
   const [fStockInput, setFStockInput] = useState("");
   const [fIndustryTags, setFIndustryTags] = useState([]);
@@ -176,28 +175,6 @@ export default function NewsJournal() {
     setShowForm(true);
   }
 
-  async function handleFetchTitle() {
-    if (!fUrl.trim()) return;
-    setFFetching(true);
-    try {
-      const res = await fetch(
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(fUrl.trim())}`
-      );
-      const html = await res.text();
-      const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-      if (match && match[1].trim()) {
-        setFTitle(decodeEntities(match[1].trim()));
-        showToast("제목을 가져왔어요. 확인 후 필요하면 수정해주세요.");
-      } else {
-        showToast("제목을 찾지 못했어요. 직접 입력해주세요.");
-      }
-    } catch (e) {
-      showToast("자동으로 제목을 가져오지 못했어요. 직접 입력해주세요.");
-    } finally {
-      setFFetching(false);
-    }
-  }
-
   function addChip(input, setInput, tags, setTags) {
     const clean = input.trim().replace(/^#/, "");
     if (!clean) return;
@@ -216,7 +193,7 @@ export default function NewsJournal() {
       const res = await fetch("/api/summarize", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: bulletText }),
+        body: JSON.stringify({ url: entry.url || "", text: bulletText }),
       });
       if (!res.ok) throw new Error("request failed");
       const data = await res.json();
@@ -312,7 +289,15 @@ export default function NewsJournal() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((e) => {
         text += `[${e.date}] ${e.title}\n`;
-        if (e.oneLiner) text += `▸ ${e.oneLiner}\n`;
+        if (e.oneLiner) {
+          e.oneLiner
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .forEach((l) => {
+              text += `▸ ${l}\n`;
+            });
+        }
         text += `${e.summary}\n`;
         if (e.url) text += `🔗 ${e.url}\n`;
         const allTags = [...(e.industryTags || []), ...(e.stockTags || [])];
@@ -373,7 +358,7 @@ export default function NewsJournal() {
           border-radius: 14px;
           overflow: hidden;
         }
-        .nj-inner { padding: 28px 24px 40px; max-width: 900px; margin: 0 auto; }
+        .nj-inner { padding: 28px 24px 40px; max-width: 1180px; margin: 0 auto; }
         .nj-header {
           display: flex; align-items: center; justify-content: space-between;
           padding-bottom: 18px; margin-bottom: 22px;
@@ -461,8 +446,10 @@ export default function NewsJournal() {
         .nj-entry-summary { margin: 8px 0; }
         .nj-summary-line { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.6; color: var(--text); padding: 2px 0; }
         .nj-summary-marker { flex: none; width: 7px; height: 7px; margin-top: 6.5px; border-radius: 2px; background: linear-gradient(135deg, var(--teal), var(--violet)); }
-        .nj-summary-oneline { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--text-soft); }
-        .nj-summary-oneline b { color: var(--teal); font-weight: 700; font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: nowrap; }
+        .nj-ai-summary { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+        .nj-ai-summary-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--violet); font-weight: 700; margin-bottom: 5px; letter-spacing: 0.03em; }
+        .nj-summary-line.ai { font-size: 13px; }
+        .nj-summary-marker.ai { background: var(--violet); }
         .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12px; cursor: pointer; padding: 0; font-family: 'Inter', sans-serif; }
         .nj-oneline-btn:hover { text-decoration: underline; }
         .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
@@ -496,11 +483,6 @@ export default function NewsJournal() {
         }
         .nj-input:focus, .nj-textarea:focus, .nj-date:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
         .nj-textarea { min-height: 110px; resize: vertical; font-family: 'Inter', sans-serif; }
-        .nj-fetchbtn {
-          border: none; background: linear-gradient(135deg, var(--teal), var(--violet)); color: #0a0d13; border-radius: 8px;
-          padding: 0 14px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
-        }
-        .nj-fetchbtn:disabled { opacity: 0.5; cursor: default; }
         .nj-field-gap { margin-top: 8px; }
         .nj-mini-label { font-size: 11.5px; color: var(--text-soft); margin-bottom: 4px; }
         .nj-chips-input { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -681,17 +663,25 @@ export default function NewsJournal() {
                 ))}
               </div>
               {e.oneLiner ? (
-                <div className="nj-summary-oneline">
-                  <b>AI 요약</b>
-                  <span>{e.oneLiner}</span>
+                <div className="nj-ai-summary">
+                  <div className="nj-ai-summary-label">AI 요약</div>
+                  {e.oneLiner
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean)
+                    .map((line, i) => (
+                      <div className="nj-summary-line ai" key={i}>
+                        <span className="nj-summary-marker ai" />
+                        <span>{line}</span>
+                      </div>
+                    ))}
                 </div>
               ) : summarizing[e.id] ? (
-                <div className="nj-summary-oneline">
-                  <b>AI 요약</b>
-                  <span>생성 중...</span>
+                <div className="nj-ai-summary">
+                  <div className="nj-ai-summary-label">AI 요약 · 생성 중...</div>
                 </div>
               ) : (
-                <div className="nj-summary-oneline">
+                <div className="nj-ai-summary">
                   <button className="nj-oneline-btn" onClick={() => requestOneLiner(e)}>
                     AI 요약 생성
                   </button>
@@ -755,19 +745,14 @@ export default function NewsJournal() {
               <div className="nj-section-label">
                 <Link2 size={13} /> 1. 뉴스 링크
               </div>
-              <div className="nj-row">
-                <input
-                  className="nj-input"
-                  placeholder="https://..."
-                  value={fUrl}
-                  onChange={(ev) => setFUrl(ev.target.value)}
-                />
-                <button className="nj-fetchbtn" onClick={handleFetchTitle} disabled={fFetching || !fUrl.trim()}>
-                  {fFetching ? "가져오는 중" : "제목 가져오기"}
-                </button>
-              </div>
+              <input
+                className="nj-input"
+                placeholder="https://..."
+                value={fUrl}
+                onChange={(ev) => setFUrl(ev.target.value)}
+              />
               <div className="nj-field-gap">
-                <div className="nj-mini-label">제목 (자동으로 안 채워지면 직접 입력해주세요)</div>
+                <div className="nj-mini-label">제목</div>
                 <input
                   className="nj-input"
                   placeholder="뉴스 제목"
