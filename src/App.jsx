@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity } from "lucide-react";
+import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw } from "lucide-react";
 import { storage } from "./storage.js";
 
 const STORAGE_KEY = "news-journal-entries";
@@ -156,12 +156,31 @@ export default function NewsJournal() {
   // AI summary fetch) was in flight.
   function patchEntry(id, patch) {
     setEntries((prev) => {
-      const updated = prev.map((e) => (e.id === id ? { ...e, ...patch } : e));
-      storage.set(STORAGE_KEY, JSON.stringify(updated)).then((ok) => {
-        if (!ok) showToast("저장에 실패했어요. 다시 시도해주세요.");
-      }).catch(() => showToast("저장 중 오류가 발생했어요."));
+      const updated = prev.map((e) =>
+        e.id === id ? { ...e, ...(typeof patch === "function" ? patch(e) : patch) } : e
+      );
+      storage
+        .set(STORAGE_KEY, JSON.stringify(updated))
+        .then((ok) => {
+          if (!ok) showToast("저장에 실패했어요. 다시 시도해주세요.");
+        })
+        .catch(() => showToast("저장 중 오류가 발생했어요."));
       return updated;
     });
+  }
+
+  function addSuggestedKeyword(entryId, keyword, category) {
+    const field = category === "industry" ? "industryTags" : "stockTags";
+    const suggestField = category === "industry" ? "aiIndustryKeywords" : "aiStockKeywords";
+    patchEntry(entryId, (e) => {
+      const current = e[field] || [];
+      const alreadyThere = current.some((t) => t.toLowerCase() === keyword.toLowerCase());
+      return {
+        [field]: alreadyThere ? current : [...current, keyword],
+        [suggestField]: (e[suggestField] || []).filter((k) => k !== keyword),
+      };
+    });
+    showToast(`#${keyword} 키워드를 추가했어요.`);
   }
 
   function resetForm() {
@@ -220,7 +239,11 @@ export default function NewsJournal() {
         throw new Error(reason);
       }
       if (data.summary) {
-        patchEntry(entry.id, { oneLiner: data.summary });
+        patchEntry(entry.id, {
+          oneLiner: data.summary,
+          aiIndustryKeywords: Array.isArray(data.industryKeywords) ? data.industryKeywords : [],
+          aiStockKeywords: Array.isArray(data.stockKeywords) ? data.stockKeywords : [],
+        });
       } else {
         throw new Error("요약 결과가 비어 있어요.");
       }
@@ -438,6 +461,7 @@ export default function NewsJournal() {
         .nj-stamp:hover { transform: scale(1.07); }
         .nj-stamp.selected { background: currentColor; }
         .nj-stamp.selected span { color: var(--bg); }
+        .nj-stamp-count { font-size: 0.72em; opacity: 0.7; margin-left: 5px; font-family: 'JetBrains Mono', monospace; font-weight: 500; }
 
         .nj-cat-industry .nj-stamp { color: var(--teal); box-shadow: 0 0 12px rgba(45,212,191,0.18); }
         .nj-cat-stock .nj-stamp { color: var(--violet); box-shadow: 0 0 12px rgba(167,139,250,0.18); }
@@ -468,12 +492,28 @@ export default function NewsJournal() {
         .nj-summary-line { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.6; color: var(--text); padding: 2px 0; }
         .nj-summary-marker { flex: none; width: 7px; height: 7px; margin-top: 6.5px; border-radius: 2px; background: linear-gradient(135deg, var(--teal), var(--violet)); }
         .nj-ai-summary { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
-        .nj-ai-summary-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--violet); font-weight: 700; margin-bottom: 5px; letter-spacing: 0.03em; }
+        .nj-ai-summary-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+        .nj-ai-summary-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--violet); font-weight: 700; letter-spacing: 0.03em; }
+        .nj-ai-refresh-btn { border: none; background: none; color: var(--text-soft); cursor: pointer; display: flex; align-items: center; padding: 3px; border-radius: 5px; transition: color .15s ease, background .15s ease; }
+        .nj-ai-refresh-btn:hover { color: var(--violet); background: rgba(167,139,250,0.12); }
         .nj-summary-line.ai { font-size: 13px; }
         .nj-summary-marker.ai { background: var(--violet); }
         .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12px; cursor: pointer; padding: 0; font-family: 'Inter', sans-serif; }
         .nj-oneline-btn:hover { text-decoration: underline; }
-        .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+        .nj-ai-kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+        .nj-ai-kw-chip {
+          display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 5px 3px 10px;
+          border-radius: 999px; font-family: 'JetBrains Mono', monospace; border: 1px dashed;
+        }
+        .nj-ai-kw-chip.industry { color: var(--teal); border-color: rgba(45,212,191,0.45); background: rgba(45,212,191,0.06); }
+        .nj-ai-kw-chip.stock { color: var(--violet); border-color: rgba(167,139,250,0.45); background: rgba(167,139,250,0.06); }
+        .nj-kw-add-btn {
+          border: none; background: rgba(255,255,255,0.1); color: inherit; width: 16px; height: 16px; border-radius: 50%;
+          font-size: 10px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          line-height: 1; padding: 0; font-family: 'Inter', sans-serif;
+        }
+        .nj-kw-add-btn:hover { background: currentColor; color: var(--bg); }
+        .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
         .nj-chip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; }
         .nj-chip.industry { background: rgba(45,212,191,0.12); color: var(--teal); }
         .nj-chip.stock { background: rgba(167,139,250,0.14); color: var(--violet); }
@@ -631,6 +671,7 @@ export default function NewsJournal() {
                 title={`${count}건`}
               >
                 <span>{tag}</span>
+                <span className="nj-stamp-count">{count}회</span>
               </span>
             ))
           )}
@@ -675,39 +716,6 @@ export default function NewsJournal() {
                 )}
                 <span className="nj-entry-date">{e.date}</span>
               </div>
-              <div className="nj-entry-summary">
-                {parseSummaryLines(e.summary).map((line, i) => (
-                  <div className="nj-summary-line" key={i}>
-                    <span className="nj-summary-marker" />
-                    <span>{line}</span>
-                  </div>
-                ))}
-              </div>
-              {e.oneLiner ? (
-                <div className="nj-ai-summary">
-                  <div className="nj-ai-summary-label">AI 요약</div>
-                  {e.oneLiner
-                    .split("\n")
-                    .map((l) => l.trim())
-                    .filter(Boolean)
-                    .map((line, i) => (
-                      <div className="nj-summary-line ai" key={i}>
-                        <span className="nj-summary-marker ai" />
-                        <span>{line}</span>
-                      </div>
-                    ))}
-                </div>
-              ) : summarizing[e.id] ? (
-                <div className="nj-ai-summary">
-                  <div className="nj-ai-summary-label">AI 요약 · 생성 중...</div>
-                </div>
-              ) : (
-                <div className="nj-ai-summary">
-                  <button className="nj-oneline-btn" onClick={() => requestOneLiner(e)}>
-                    AI 요약 생성
-                  </button>
-                </div>
-              )}
               <div className="nj-entry-tags">
                 {(e.industryTags || []).map((t) => (
                   <span key={"i" + t} className="nj-chip industry">
@@ -720,6 +728,78 @@ export default function NewsJournal() {
                   </span>
                 ))}
               </div>
+              <div className="nj-entry-summary">
+                {parseSummaryLines(e.summary).map((line, i) => (
+                  <div className="nj-summary-line" key={i}>
+                    <span className="nj-summary-marker" />
+                    <span>{line}</span>
+                  </div>
+                ))}
+              </div>
+              {e.oneLiner || summarizing[e.id] ? (
+                <div className="nj-ai-summary">
+                  <div className="nj-ai-summary-head">
+                    <span className="nj-ai-summary-label">
+                      {summarizing[e.id] ? "AI 요약 · 생성 중..." : "AI 요약"}
+                    </span>
+                    {!summarizing[e.id] && (
+                      <button
+                        className="nj-ai-refresh-btn"
+                        title="AI 요약 다시 생성"
+                        onClick={() => requestOneLiner(e)}
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                    )}
+                  </div>
+                  {e.oneLiner &&
+                    e.oneLiner
+                      .split("\n")
+                      .map((l) => l.trim())
+                      .filter(Boolean)
+                      .map((line, i) => (
+                        <div className="nj-summary-line ai" key={i}>
+                          <span className="nj-summary-marker ai" />
+                          <span>{line}</span>
+                        </div>
+                      ))}
+                  {((e.aiIndustryKeywords && e.aiIndustryKeywords.length > 0) ||
+                    (e.aiStockKeywords && e.aiStockKeywords.length > 0)) && (
+                    <div className="nj-ai-kw-row">
+                      {(e.aiIndustryKeywords || []).map((kw) => (
+                        <span className="nj-ai-kw-chip industry" key={"aki" + kw}>
+                          #{kw}
+                          <button
+                            className="nj-kw-add-btn"
+                            title="산업군 키워드로 추가"
+                            onClick={() => addSuggestedKeyword(e.id, kw, "industry")}
+                          >
+                            !
+                          </button>
+                        </span>
+                      ))}
+                      {(e.aiStockKeywords || []).map((kw) => (
+                        <span className="nj-ai-kw-chip stock" key={"aks" + kw}>
+                          #{kw}
+                          <button
+                            className="nj-kw-add-btn"
+                            title="종목·기술 키워드로 추가"
+                            onClick={() => addSuggestedKeyword(e.id, kw, "stock")}
+                          >
+                            !
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="nj-ai-summary">
+                  <button className="nj-oneline-btn" onClick={() => requestOneLiner(e)}>
+                    AI 요약 생성
+                  </button>
+                </div>
+              )}
               <div className="nj-entry-actions">
                 {confirmDeleteId === e.id ? (
                   <>

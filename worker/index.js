@@ -62,10 +62,17 @@ async function handleSummarize(request, env) {
 
   const instruction =
     sourceType === "article"
-      ? "다음은 한 뉴스 기사 페이지에서 추출한 본문 텍스트다. 이 기사의 핵심 내용을 한국어 2~3줄로 요약해줘. " +
-        "각 줄은 줄바꿈으로만 구분하고, 번호나 기호, 따옴표를 붙이지 마. 원문 문장을 그대로 옮기지 말고 핵심만 너의 표현으로 정리해줘."
-      : "다음은 한 개인 투자자가 직접 읽고 정리한 뉴스 기록의 요점들이다. 이 내용을 핵심만 담아 한국어 2~3줄로 요약해줘. " +
-        "각 줄은 줄바꿈으로만 구분하고, 번호나 기호를 붙이지 마.";
+      ? "다음은 한 뉴스 기사 페이지에서 추출한 본문 텍스트다. 이 기사의 핵심 내용을 한국어 2~3줄로, 완결된 문장으로 요약해줘. " +
+        "원문 문장을 그대로 옮기지 말고 핵심만 너의 표현으로 정리해줘. " +
+        "그리고 이 기사와 관련된 산업군/섹터 키워드(최대 3개)와 관련 기업명·기술명 키워드(최대 4개)도 뽑아줘."
+      : "다음은 한 개인 투자자가 직접 읽고 정리한 뉴스 기록의 요점들이다. 이 내용을 핵심만 담아 한국어 2~3줄로, 완결된 문장으로 요약해줘. " +
+        "그리고 이 내용과 관련된 산업군/섹터 키워드(최대 3개)와 관련 기업명·기술명 키워드(최대 4개)도 뽑아줘.";
+
+  const jsonInstruction =
+    '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해.\n' +
+    '{"summary": "한국어 2~3줄 요약, 줄 사이는 \\n로 구분, 번호나 기호 없이 완결된 문장", ' +
+    '"industryKeywords": ["산업군/섹터 키워드", "..."], ' +
+    '"stockKeywords": ["기업명/기술명 키워드", "..."]}';
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -77,11 +84,11 @@ async function handleSummarize(request, env) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 220,
+        max_tokens: 500,
         messages: [
           {
             role: "user",
-            content: `${instruction}\n\n${sourceContent}`,
+            content: `${instruction}\n\n${jsonInstruction}\n\n---\n${sourceContent}`,
           },
         ],
       }),
@@ -93,16 +100,31 @@ async function handleSummarize(request, env) {
     }
 
     const data = await res.json();
-    const summary = (data.content || [])
+    const rawText = (data.content || [])
       .map((block) => (block.type === "text" ? block.text : ""))
       .join("")
       .trim();
 
-    if (!summary) {
+    if (!rawText) {
       return json({ error: "empty_response" }, 502);
     }
 
-    return json({ summary, source: sourceType });
+    let parsed;
+    try {
+      let cleaned = rawText.trim();
+      cleaned = cleaned.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+      parsed = JSON.parse(cleaned);
+    } catch (parseErr) {
+      // Model didn't return clean JSON — fall back to using the raw text as the summary.
+      parsed = { summary: rawText, industryKeywords: [], stockKeywords: [] };
+    }
+
+    return json({
+      summary: (parsed.summary || rawText).toString(),
+      industryKeywords: Array.isArray(parsed.industryKeywords) ? parsed.industryKeywords.slice(0, 5) : [],
+      stockKeywords: Array.isArray(parsed.stockKeywords) ? parsed.stockKeywords.slice(0, 5) : [],
+      source: sourceType,
+    });
   } catch (e) {
     return json({ error: "server_error", detail: String(e) }, 500);
   }
