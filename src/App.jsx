@@ -89,6 +89,13 @@ function decodeEntities(str) {
   el.innerHTML = str;
   return el.value;
 }
+function parseSummaryLines(summary) {
+  return (summary || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^([*\-•]|\d+[).])\s*/, ""));
+}
 
 export default function NewsJournal() {
   const [entries, setEntries] = useState([]);
@@ -102,6 +109,7 @@ export default function NewsJournal() {
   const [manualCopyText, setManualCopyText] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [summarizing, setSummarizing] = useState({});
   const listRef = useRef(null);
 
   // form state
@@ -201,6 +209,34 @@ export default function NewsJournal() {
     setInput("");
   }
 
+  async function requestOneLiner(entry) {
+    setSummarizing((s) => ({ ...s, [entry.id]: true }));
+    try {
+      const bulletText = parseSummaryLines(entry.summary).join(" / ");
+      const res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: bulletText }),
+      });
+      if (!res.ok) throw new Error("request failed");
+      const data = await res.json();
+      if (data.summary) {
+        const updated = entries.map((e) => (e.id === entry.id ? { ...e, oneLiner: data.summary } : e));
+        persist(updated);
+      } else {
+        throw new Error("no summary");
+      }
+    } catch (e) {
+      showToast("AI 요약 생성에 실패했어요. Cloudflare 설정을 확인해주세요.");
+    } finally {
+      setSummarizing((s) => {
+        const next = { ...s };
+        delete next[entry.id];
+        return next;
+      });
+    }
+  }
+
   function handleSave() {
     if (!fTitle.trim() && !fUrl.trim()) {
       showToast("제목이나 뉴스 링크 중 하나는 입력해주세요.");
@@ -211,23 +247,24 @@ export default function NewsJournal() {
       return;
     }
     if (editingId) {
-      const updated = entries.map((e) =>
-        e.id === editingId
-          ? {
-              ...e,
-              date: fDate,
-              url: fUrl.trim(),
-              title: fTitle.trim() || "(제목 없음)",
-              industryTags: fIndustryTags,
-              stockTags: fStockTags,
-              summary: fSummary.trim(),
-            }
-          : e
-      );
+      const original = entries.find((e) => e.id === editingId);
+      const summaryChanged = original && original.summary !== fSummary.trim();
+      const updatedEntry = {
+        ...original,
+        date: fDate,
+        url: fUrl.trim(),
+        title: fTitle.trim() || "(제목 없음)",
+        industryTags: fIndustryTags,
+        stockTags: fStockTags,
+        summary: fSummary.trim(),
+        oneLiner: summaryChanged ? undefined : original?.oneLiner,
+      };
+      const updated = entries.map((e) => (e.id === editingId ? updatedEntry : e));
       persist(updated);
       resetForm();
       setShowForm(false);
       showToast("기록을 수정했어요.");
+      if (summaryChanged) requestOneLiner(updatedEntry);
       return;
     }
     const entry = {
@@ -244,6 +281,7 @@ export default function NewsJournal() {
     resetForm();
     setShowForm(false);
     showToast("기록을 저장했어요.");
+    requestOneLiner(entry);
   }
 
   function handleDelete(id) {
@@ -274,6 +312,7 @@ export default function NewsJournal() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((e) => {
         text += `[${e.date}] ${e.title}\n`;
+        if (e.oneLiner) text += `▸ ${e.oneLiner}\n`;
         text += `${e.summary}\n`;
         if (e.url) text += `🔗 ${e.url}\n`;
         const allTags = [...(e.industryTags || []), ...(e.stockTags || [])];
@@ -419,7 +458,13 @@ export default function NewsJournal() {
         .nj-entry-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-soft); white-space: nowrap; }
         .nj-entry-title { font-weight: 600; font-size: 14.5px; color: var(--teal); text-decoration: none; }
         .nj-entry-title:hover { text-decoration: underline; }
-        .nj-entry-summary { font-size: 13.5px; line-height: 1.6; margin: 8px 0; color: var(--text); white-space: pre-wrap; }
+        .nj-entry-summary { margin: 8px 0; }
+        .nj-summary-line { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.6; color: var(--text); padding: 2px 0; }
+        .nj-summary-marker { flex: none; width: 7px; height: 7px; margin-top: 6.5px; border-radius: 2px; background: linear-gradient(135deg, var(--teal), var(--violet)); }
+        .nj-summary-oneline { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--text-soft); }
+        .nj-summary-oneline b { color: var(--teal); font-weight: 700; font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: nowrap; }
+        .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12px; cursor: pointer; padding: 0; font-family: 'Inter', sans-serif; }
+        .nj-oneline-btn:hover { text-decoration: underline; }
         .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
         .nj-chip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; }
         .nj-chip.industry { background: rgba(45,212,191,0.12); color: var(--teal); }
@@ -627,7 +672,31 @@ export default function NewsJournal() {
                   </span>
                 )}
               </div>
-              <div className="nj-entry-summary">{e.summary}</div>
+              <div className="nj-entry-summary">
+                {parseSummaryLines(e.summary).map((line, i) => (
+                  <div className="nj-summary-line" key={i}>
+                    <span className="nj-summary-marker" />
+                    <span>{line}</span>
+                  </div>
+                ))}
+              </div>
+              {e.oneLiner ? (
+                <div className="nj-summary-oneline">
+                  <b>AI 요약</b>
+                  <span>{e.oneLiner}</span>
+                </div>
+              ) : summarizing[e.id] ? (
+                <div className="nj-summary-oneline">
+                  <b>AI 요약</b>
+                  <span>생성 중...</span>
+                </div>
+              ) : (
+                <div className="nj-summary-oneline">
+                  <button className="nj-oneline-btn" onClick={() => requestOneLiner(e)}>
+                    AI 요약 생성
+                  </button>
+                </div>
+              )}
               <div className="nj-entry-tags">
                 {(e.industryTags || []).map((t) => (
                   <span key={"i" + t} className="nj-chip industry">
