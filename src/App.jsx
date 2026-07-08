@@ -101,6 +101,7 @@ export default function NewsJournal() {
   const [toast, setToast] = useState(null);
   const [manualCopyText, setManualCopyText] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const listRef = useRef(null);
 
   // form state
@@ -143,6 +144,7 @@ export default function NewsJournal() {
   }
 
   function resetForm() {
+    setEditingId(null);
     setFUrl("");
     setFTitle("");
     setFDate(todayStr());
@@ -151,6 +153,19 @@ export default function NewsJournal() {
     setFIndustryTags([]);
     setFStockTags([]);
     setFSummary("");
+  }
+
+  function openEdit(entry) {
+    setEditingId(entry.id);
+    setFUrl(entry.url || "");
+    setFTitle(entry.title || "");
+    setFDate(entry.date || todayStr());
+    setFIndustryInput("");
+    setFStockInput("");
+    setFIndustryTags(entry.industryTags || []);
+    setFStockTags(entry.stockTags || []);
+    setFSummary(entry.summary || "");
+    setShowForm(true);
   }
 
   async function handleFetchTitle() {
@@ -193,6 +208,26 @@ export default function NewsJournal() {
     }
     if (!fSummary.trim()) {
       showToast("요약을 작성해주세요.");
+      return;
+    }
+    if (editingId) {
+      const updated = entries.map((e) =>
+        e.id === editingId
+          ? {
+              ...e,
+              date: fDate,
+              url: fUrl.trim(),
+              title: fTitle.trim() || "(제목 없음)",
+              industryTags: fIndustryTags,
+              stockTags: fStockTags,
+              summary: fSummary.trim(),
+            }
+          : e
+      );
+      persist(updated);
+      resetForm();
+      setShowForm(false);
+      showToast("기록을 수정했어요.");
       return;
     }
     const entry = {
@@ -384,7 +419,7 @@ export default function NewsJournal() {
         .nj-entry-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-soft); white-space: nowrap; }
         .nj-entry-title { font-weight: 600; font-size: 14.5px; color: var(--teal); text-decoration: none; }
         .nj-entry-title:hover { text-decoration: underline; }
-        .nj-entry-summary { font-size: 13.5px; line-height: 1.6; margin: 8px 0; color: var(--text); }
+        .nj-entry-summary { font-size: 13.5px; line-height: 1.6; margin: 8px 0; color: var(--text); white-space: pre-wrap; }
         .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
         .nj-chip { font-size: 11.5px; padding: 2px 9px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; }
         .nj-chip.industry { background: rgba(45,212,191,0.12); color: var(--teal); }
@@ -415,7 +450,7 @@ export default function NewsJournal() {
           box-sizing: border-box;
         }
         .nj-input:focus, .nj-textarea:focus, .nj-date:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
-        .nj-textarea { min-height: 84px; resize: vertical; font-family: 'Inter', sans-serif; }
+        .nj-textarea { min-height: 110px; resize: vertical; font-family: 'Inter', sans-serif; }
         .nj-fetchbtn {
           border: none; background: linear-gradient(135deg, var(--teal), var(--violet)); color: #0a0d13; border-radius: 8px;
           padding: 0 14px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
@@ -471,7 +506,13 @@ export default function NewsJournal() {
               <div className="nj-sub">시장의 맥박을 짚다 · 누적 기록 {entries.length}건</div>
             </div>
           </div>
-          <button className="nj-newbtn" onClick={() => setShowForm(true)}>
+          <button
+            className="nj-newbtn"
+            onClick={() => {
+              resetForm();
+              setShowForm(true);
+            }}
+          >
             <Plus size={16} /> 새 기록
           </button>
         </div>
@@ -607,7 +648,10 @@ export default function NewsJournal() {
                     <button onClick={() => setConfirmDeleteId(null)}>아니오</button>
                   </>
                 ) : (
-                  <button onClick={() => setConfirmDeleteId(e.id)}>삭제</button>
+                  <>
+                    <button onClick={() => openEdit(e)}>수정</button>
+                    <button onClick={() => setConfirmDeleteId(e.id)}>삭제</button>
+                  </>
                 )}
               </div>
             </div>
@@ -616,11 +660,24 @@ export default function NewsJournal() {
       </div>
 
       {showForm && (
-        <div className="nj-modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowForm(false)}>
+        <div
+          className="nj-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowForm(false);
+              resetForm();
+            }
+          }}
+        >
           <div className="nj-modal">
             <div className="nj-modal-head">
-              <h3>새 뉴스 기록</h3>
-              <button onClick={() => setShowForm(false)}>
+              <h3>{editingId ? "기록 수정" : "새 뉴스 기록"}</h3>
+              <button
+                onClick={() => {
+                  setShowForm(false);
+                  resetForm();
+                }}
+              >
                 <X size={18} />
               </button>
             </div>
@@ -714,16 +771,19 @@ export default function NewsJournal() {
 
             <div className="nj-section">
               <div className="nj-section-label">3. 뉴스 요약 (직접 작성)</div>
+              <div className="nj-mini-label" style={{ marginBottom: 6 }}>
+                엔터로 문단을 나눠서 적어보면 나중에 읽기 편해요. 예: 1) ... ↵ 2) ...
+              </div>
               <textarea
                 className="nj-textarea"
-                placeholder="이 뉴스를 왜 중요하다고 봤는지, 직접 씨름한 내용을 남겨주세요."
+                placeholder={"이 뉴스를 왜 중요하다고 봤는지 적어주세요.\n1) ...\n2) ..."}
                 value={fSummary}
                 onChange={(ev) => setFSummary(ev.target.value)}
               />
             </div>
 
             <button className="nj-savebtn" onClick={handleSave}>
-              저장
+              {editingId ? "수정 완료" : "저장"}
             </button>
           </div>
         </div>
