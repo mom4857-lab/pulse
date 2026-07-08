@@ -1,6 +1,6 @@
 ﻿{
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "pulse-journal-app",
+  "name": "pulse",
   "compatibility_date": "2026-07-08",
   "assets": {
     "directory": "dist",
