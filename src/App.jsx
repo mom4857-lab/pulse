@@ -472,7 +472,11 @@ export default function NewsJournal() {
         .nj-stamp:hover { transform: scale(1.07); }
         .nj-stamp.selected { background: currentColor; }
         .nj-stamp.selected span { color: var(--bg); }
-        .nj-stamp-count { font-size: 0.72em; opacity: 0.7; margin-left: 5px; font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+        .nj-stamp-count {
+          position: absolute; top: -7px; right: -7px; font-size: 10px; line-height: 1;
+          padding: 2px 5px; border-radius: 999px; background: var(--bg); border: 1px solid currentColor;
+          font-family: 'JetBrains Mono', monospace; font-weight: 700;
+        }
 
         .nj-cat-industry .nj-stamp { color: var(--teal); box-shadow: 0 0 12px rgba(45,212,191,0.18); }
         .nj-cat-stock .nj-stamp { color: var(--violet); box-shadow: 0 0 12px rgba(167,139,250,0.18); }
@@ -691,7 +695,7 @@ export default function NewsJournal() {
                 title={`${count}건`}
               >
                 <span>{tag}</span>
-                <span className="nj-stamp-count">{count}회</span>
+                <span className="nj-stamp-count">{count}</span>
               </span>
             ))
           )}

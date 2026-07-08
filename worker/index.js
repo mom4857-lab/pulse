@@ -60,6 +60,11 @@ async function handleSummarize(request, env) {
     sourceType = "notes";
   }
 
+  const singleTermRule =
+    "각 키워드는 반드시 하나의 단일 용어여야 한다. 괄호, 슬래시(/), 쉼표, '·' 등으로 여러 개념을 한 키워드에 묶지 마라. " +
+    "예를 들어 '메모리반도체(D램/HBM)'나 '반도체 소재,부품,장비(소부장)'처럼 쓰지 말고, 정말 연관성이 가장 높은 것 하나만 골라 'HBM'처럼 짧은 단일 용어로 써라. " +
+    "여러 개념이 각각 중요하다면 합치지 말고 별도의 키워드 항목으로 나눠 담아라 (단, 전체 개수 제한은 지켜라).";
+
   const instruction =
     sourceType === "article"
       ? "다음은 한 뉴스 기사 페이지에서 추출한 본문 텍스트다. 이 기사의 핵심 내용을 한국어 2~3줄로, 완결된 문장으로 요약해줘. " +
@@ -69,20 +74,22 @@ async function handleSummarize(request, env) {
         "(2) 관련 키워드 최대 3개 — 기업명, 기술명, 제품·소재명 중 무엇이든 될 수 있다. " +
         "기사에 직접 언급되지 않았더라도, 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 수요나 실적에 실질적으로 영향을 받을 만한 항목이면 포함해라. " +
         "예를 들어 HBM 수요 확대 기사라면 관련 패키징 기판(FC-BGA)이나 후공정 장비처럼 함께 움직일 만한 항목도 추천 대상이다. " +
-        "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명에는 이 제한이 없다."
+        "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명에는 이 제한이 없다. " +
+        singleTermRule
       : "다음은 한 개인 투자자가 직접 읽고 정리한 뉴스 기록의 요점들이다. 이 내용을 핵심만 담아 한국어 2~3줄로, 완결된 문장으로 요약해줘. " +
         "그리고 이 내용의 밸류체인과 시장 상황을 전반적으로 분석해서, 실제로 연관성이 높은 키워드를 총 5개 이내로 추천해줘: " +
         "(1) 산업군/섹터 키워드 최대 2개. " +
         "(2) 관련 키워드 최대 3개 — 기업명, 기술명, 제품·소재명 중 무엇이든 될 수 있다. " +
         "직접 언급되지 않았더라도, 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 수요나 실적에 실질적으로 영향을 받을 만한 항목이면 포함해라. " +
         "예를 들어 HBM 수요 확대 내용이라면 관련 패키징 기판(FC-BGA)이나 후공정 장비처럼 함께 움직일 만한 항목도 추천 대상이다. " +
-        "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명에는 이 제한이 없다.";
+        "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명에는 이 제한이 없다. " +
+        singleTermRule;
 
   const jsonInstruction =
     '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해.\n' +
     '{"summary": "한국어 2~3줄 요약, 줄 사이는 \\n로 구분, 번호나 기호 없이 완결된 문장", ' +
-    '"industryKeywords": ["산업군/섹터 키워드 (최대 2개)"], ' +
-    '"stockKeywords": ["관련 기업(상장사)/기술/제품 키워드 (최대 3개)"]}';
+    '"industryKeywords": ["단일 용어 산업군/섹터 키워드 (최대 2개, 괄호/슬래시 금지)"], ' +
+    '"stockKeywords": ["단일 용어 기업(상장사)/기술/제품 키워드 (최대 3개, 괄호/슬래시 금지)"]}';
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -131,8 +138,8 @@ async function handleSummarize(request, env) {
 
     return json({
       summary: (parsed.summary || rawText).toString(),
-      industryKeywords: Array.isArray(parsed.industryKeywords) ? parsed.industryKeywords.slice(0, 2) : [],
-      stockKeywords: Array.isArray(parsed.stockKeywords) ? parsed.stockKeywords.slice(0, 3) : [],
+      industryKeywords: normalizeKeywords(parsed.industryKeywords, 2),
+      stockKeywords: normalizeKeywords(parsed.stockKeywords, 3),
       source: sourceType,
     });
   } catch (e) {
@@ -173,6 +180,45 @@ async function extractReadableText(html) {
   await transformed.text();
 
   return text.replace(/\s+/g, " ").trim();
+}
+
+// Safety net in case the model still returns compound keywords despite the
+// prompt instruction — splits on slash/comma, unwraps "A(B)" into A and B as
+// separate candidates, dedupes, and caps to maxCount.
+function normalizeKeywords(arr, maxCount) {
+  if (!Array.isArray(arr)) return [];
+
+  // First pass: unwrap "A(B)" style brackets into two separate candidates,
+  // since the bracket content is often itself a compound (e.g. "D램/HBM").
+  let candidates = [];
+  for (const raw of arr) {
+    if (typeof raw !== "string") continue;
+    const bracketMatch = raw.match(/^\s*([^()（）]+?)\s*[\(（]([^()）]+)[\)）]\s*$/);
+    if (bracketMatch) {
+      candidates.push(bracketMatch[1]);
+      candidates.push(bracketMatch[2]);
+    } else {
+      candidates.push(raw.replace(/[()（）]/g, ""));
+    }
+  }
+
+  // Second pass: split any remaining compound separators.
+  let out = [];
+  for (const c of candidates) {
+    out.push(...c.split(/[\/,、·]/));
+  }
+
+  const seen = new Set();
+  const deduped = [];
+  for (const k of out) {
+    const clean = k.trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(clean);
+  }
+  return deduped.slice(0, maxCount);
 }
 
 function json(obj, status = 200) {
