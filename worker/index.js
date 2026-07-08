@@ -1,11 +1,20 @@
-// Cloudflare Pages Function — runs server-side, keeps the API key secret.
-// Route: POST /api/summarize
-// Body: { text: string }
-// Response: { summary: string }
+// Cloudflare Worker entry point.
+// Routes POST /api/summarize to the AI summary handler (server-side, keeps
+// the API key secret) and everything else to the static site (dist/).
 
-export async function onRequestPost(context) {
-  const { request, env } = context;
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
+    if (url.pathname === "/api/summarize" && request.method === "POST") {
+      return handleSummarize(request, env);
+    }
+
+    return env.ASSETS.fetch(request);
+  },
+};
+
+async function handleSummarize(request, env) {
   let body;
   try {
     body = await request.json();
