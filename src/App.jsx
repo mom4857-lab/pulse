@@ -3,6 +3,7 @@ import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, Re
 import { storage } from "./storage.js";
 
 const STORAGE_KEY = "news-journal-entries";
+const ANALYSIS_KEY = "news-journal-period-analyses";
 
 // ---------- date helpers ----------
 function startOfWeek(d) {
@@ -54,6 +55,12 @@ function todayStr() {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+function getPeriodKey(type, refDate) {
+  if (type === "year") return `year:${refDate.getFullYear()}`;
+  if (type === "month") return `month:${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, "0")}`;
+  const s = startOfWeek(refDate);
+  return `week:${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}`;
 }
 
 // ---------- tag helpers ----------
@@ -109,7 +116,8 @@ export default function NewsJournal() {
   const [manualCopyText, setManualCopyText] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  const [summarizing, setSummarizing] = useState({});
+  const [periodAnalyses, setPeriodAnalyses] = useState({});
+  const [analyzing, setAnalyzing] = useState(false);
   const listRef = useRef(null);
 
   // form state
@@ -131,6 +139,12 @@ export default function NewsJournal() {
         setEntries([]);
       } finally {
         setLoaded(true);
+      }
+      try {
+        const res2 = await storage.get(ANALYSIS_KEY);
+        setPeriodAnalyses(res2 ? JSON.parse(res2.value) : {});
+      } catch (e) {
+        setPeriodAnalyses({});
       }
     })();
   }, []);
@@ -169,27 +183,20 @@ export default function NewsJournal() {
     });
   }
 
-  function addSuggestedKeyword(entryId, keyword, category) {
-    const field = category === "industry" ? "industryTags" : "stockTags";
-    const suggestField = category === "industry" ? "aiIndustryKeywords" : "aiStockKeywords";
-    patchEntry(entryId, (e) => {
-      const current = e[field] || [];
-      const alreadyThere = current.some((t) => t.toLowerCase() === keyword.toLowerCase());
-      const aiAdded = e.aiAddedTags || [];
-      return {
-        [field]: alreadyThere ? current : [...current, keyword],
-        [suggestField]: (e[suggestField] || []).filter((k) => k !== keyword),
-        aiAddedTags: aiAdded.includes(keyword) ? aiAdded : [...aiAdded, keyword],
-      };
-    });
-    showToast(`#${keyword} 키워드를 추가했어요.`);
+  async function persistAnalyses(next) {
+    setPeriodAnalyses(next);
+    try {
+      const ok = await storage.set(ANALYSIS_KEY, JSON.stringify(next));
+      if (!ok) showToast("저장에 실패했어요. 다시 시도해주세요.");
+    } catch (e) {
+      showToast("저장 중 오류가 발생했어요.");
+    }
   }
 
   function removeEntryTag(entryId, tag, category) {
     const field = category === "industry" ? "industryTags" : "stockTags";
     patchEntry(entryId, (e) => ({
       [field]: (e[field] || []).filter((t) => t !== tag),
-      aiAddedTags: (e.aiAddedTags || []).filter((t) => t !== tag),
     }));
   }
 
@@ -229,14 +236,29 @@ export default function NewsJournal() {
     setInput("");
   }
 
-  async function requestOneLiner(entry) {
-    setSummarizing((s) => ({ ...s, [entry.id]: true }));
+  async function requestPeriodAnalysis() {
+    if (periodEntries.length === 0) {
+      showToast("이 기간에는 분석할 기록이 없어요.");
+      return;
+    }
+    const key = getPeriodKey(periodType, refDate);
+    setAnalyzing(true);
     try {
-      const bulletText = parseSummaryLines(entry.summary).join(" / ");
-      const res = await fetch("/api/summarize", {
+      const payload = {
+        periodLabel: periodLabel(periodType, refDate),
+        entries: periodEntries.map((e) => ({
+          date: e.date,
+          title: e.title,
+          url: e.url,
+          summary: e.summary,
+          industryTags: e.industryTags || [],
+          stockTags: e.stockTags || [],
+        })),
+      };
+      const res = await fetch("/api/analyze-period", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: entry.url || "", text: bulletText }),
+        body: JSON.stringify(payload),
       });
       let data = null;
       try {
@@ -245,26 +267,20 @@ export default function NewsJournal() {
         throw new Error(`서버 응답을 읽을 수 없어요 (status ${res.status})`);
       }
       if (!res.ok) {
-        const reason = data && (data.error || data.detail) ? `${data.error || ""} ${data.detail || ""}`.trim() : `status ${res.status}`;
+        const reason =
+          data && (data.error || data.detail) ? `${data.error || ""} ${data.detail || ""}`.trim() : `status ${res.status}`;
         throw new Error(reason);
       }
-      if (data.summary) {
-        patchEntry(entry.id, {
-          oneLiner: data.summary,
-          aiIndustryKeywords: Array.isArray(data.industryKeywords) ? data.industryKeywords : [],
-          aiStockKeywords: Array.isArray(data.stockKeywords) ? data.stockKeywords : [],
-        });
-      } else {
-        throw new Error("요약 결과가 비어 있어요.");
-      }
+      if (!data.analysis) throw new Error("분석 결과가 비어 있어요.");
+      const next = {
+        ...periodAnalyses,
+        [key]: { analysis: data.analysis, generatedAt: Date.now(), entryCount: periodEntries.length },
+      };
+      persistAnalyses(next);
     } catch (e) {
-      showToast(`AI 요약 실패: ${String(e.message || e).slice(0, 160)}`, 9000);
+      showToast(`AI 총정리 실패: ${String(e.message || e).slice(0, 160)}`, 9000);
     } finally {
-      setSummarizing((s) => {
-        const next = { ...s };
-        delete next[entry.id];
-        return next;
-      });
+      setAnalyzing(false);
     }
   }
 
@@ -279,7 +295,6 @@ export default function NewsJournal() {
     }
     if (editingId) {
       const original = entries.find((e) => e.id === editingId);
-      const summaryChanged = original && original.summary !== fSummary.trim();
       const updatedEntry = {
         ...original,
         date: fDate,
@@ -288,14 +303,12 @@ export default function NewsJournal() {
         industryTags: fIndustryTags,
         stockTags: fStockTags,
         summary: fSummary.trim(),
-        oneLiner: summaryChanged ? undefined : original?.oneLiner,
       };
       const updated = entries.map((e) => (e.id === editingId ? updatedEntry : e));
       persist(updated);
       resetForm();
       setShowForm(false);
       showToast("기록을 수정했어요.");
-      if (summaryChanged) requestOneLiner(updatedEntry);
       return;
     }
     const entry = {
@@ -312,7 +325,6 @@ export default function NewsJournal() {
     resetForm();
     setShowForm(false);
     showToast("기록을 저장했어요.");
-    requestOneLiner(entry);
   }
 
   function handleDelete(id) {
@@ -337,21 +349,17 @@ export default function NewsJournal() {
   function buildBlogText() {
     const industryCounts = getTagCounts(periodEntries, "industry");
     const stockCounts = getTagCounts(periodEntries, "stock");
+    const key = getPeriodKey(periodType, refDate);
+    const analysis = periodAnalyses[key];
     let text = `📅 ${periodLabel(periodType, refDate)} 뉴스 노트\n\n`;
+    if (analysis && analysis.analysis) {
+      text += `🧠 AI 총정리\n${analysis.analysis}\n\n`;
+    }
     periodEntries
       .slice()
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((e) => {
         text += `[${e.date}] ${e.title}\n`;
-        if (e.oneLiner) {
-          e.oneLiner
-            .split("\n")
-            .map((l) => l.trim())
-            .filter(Boolean)
-            .forEach((l) => {
-              text += `▸ ${l}\n`;
-            });
-        }
         text += `${e.summary}\n`;
         if (e.url) text += `🔗 ${e.url}\n`;
         const allTags = [...(e.industryTags || []), ...(e.stockTags || [])];
@@ -404,7 +412,6 @@ export default function NewsJournal() {
           --teal: #2dd4bf;
           --violet: #a78bfa;
           --rose: #fb7185;
-          --gold: #f2b84b;
           font-family: 'Inter', sans-serif;
           color: var(--text);
           background: var(--bg);
@@ -506,28 +513,21 @@ export default function NewsJournal() {
         .nj-entry-summary { margin: 8px 0; }
         .nj-summary-line { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.6; color: var(--text); padding: 2px 0; }
         .nj-summary-marker { flex: none; width: 7px; height: 7px; margin-top: 6.5px; border-radius: 2px; background: linear-gradient(135deg, var(--teal), var(--violet)); }
-        .nj-ai-summary { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
-        .nj-ai-summary-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
-        .nj-ai-summary-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--violet); font-weight: 700; letter-spacing: 0.03em; }
+        .nj-period-analysis {
+          background: radial-gradient(120% 140% at 50% 0%, rgba(167,139,250,0.08), transparent 60%), var(--surface);
+          border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px;
+        }
+        .nj-period-analysis-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .nj-period-analysis-title { display: flex; align-items: center; gap: 7px; font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--violet); font-weight: 700; letter-spacing: 0.03em; }
         .nj-ai-refresh-btn { border: none; background: none; color: var(--text-soft); cursor: pointer; display: flex; align-items: center; padding: 3px; border-radius: 5px; transition: color .15s ease, background .15s ease; }
-        .nj-ai-refresh-btn:hover { color: var(--violet); background: rgba(167,139,250,0.12); }
-        .nj-summary-line.ai { font-size: 13px; }
-        .nj-summary-marker.ai { background: var(--violet); }
-        .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12px; cursor: pointer; padding: 0; font-family: 'Inter', sans-serif; }
+        .nj-ai-refresh-btn:hover:not(:disabled) { color: var(--violet); background: rgba(167,139,250,0.12); }
+        .nj-ai-refresh-btn:disabled { opacity: 0.4; cursor: default; }
+        .nj-ai-refresh-btn.spinning svg { animation: nj-spin 1s linear infinite; }
+        .nj-period-analysis-body { font-size: 13.5px; line-height: 1.75; color: var(--text); white-space: pre-wrap; }
+        .nj-period-analysis-body.muted { color: var(--text-soft); font-size: 13px; }
+        .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12.5px; cursor: pointer; padding: 0; margin-left: 8px; font-family: 'Inter', sans-serif; }
         .nj-oneline-btn:hover { text-decoration: underline; }
-        .nj-ai-kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-        .nj-ai-kw-chip {
-          display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 5px 3px 10px;
-          border-radius: 999px; font-family: 'JetBrains Mono', monospace; border: 1px dashed;
-        }
-        .nj-ai-kw-chip.industry { color: var(--teal); border-color: rgba(45,212,191,0.45); background: rgba(45,212,191,0.06); }
-        .nj-ai-kw-chip.stock { color: var(--violet); border-color: rgba(167,139,250,0.45); background: rgba(167,139,250,0.06); }
-        .nj-kw-add-btn {
-          border: none; background: rgba(255,255,255,0.1); color: inherit; width: 16px; height: 16px; border-radius: 50%;
-          font-size: 10px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center;
-          line-height: 1; padding: 0; font-family: 'Inter', sans-serif;
-        }
-        .nj-kw-add-btn:hover { background: currentColor; color: var(--bg); }
+        .nj-period-analysis-meta { font-size: 11px; color: var(--text-soft); margin-top: 8px; font-family: 'JetBrains Mono', monospace; }
         .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
         .nj-chip {
           display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 5px 2px 9px;
@@ -535,7 +535,6 @@ export default function NewsJournal() {
         }
         .nj-chip.industry { background: rgba(45,212,191,0.12); color: var(--teal); }
         .nj-chip.stock { background: rgba(167,139,250,0.14); color: var(--violet); }
-        .nj-chip.ai-added { background: rgba(242,184,75,0.16); color: var(--gold); }
         .nj-chip-remove {
           border: none; background: none; color: inherit; opacity: 0.55; cursor: pointer;
           display: flex; align-items: center; padding: 0; transition: opacity .15s ease, color .15s ease;
@@ -601,6 +600,7 @@ export default function NewsJournal() {
         @keyframes nj-fade-in { from { opacity: 0; transform: translateY(-4px);} to { opacity: 1; transform: translateY(0);} }
         @keyframes nj-pop-in { from { opacity: 0; transform: scale(0.97);} to { opacity: 1; transform: scale(1);} }
         @keyframes nj-beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.18); } 30% { transform: scale(0.96); } 45% { transform: scale(1.1); } 60% { transform: scale(1); } }
+        @keyframes nj-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
         @media (max-width: 560px) {
           .nj-inner { padding: 18px 14px 32px; }
@@ -701,6 +701,51 @@ export default function NewsJournal() {
           )}
         </div>
 
+        <div className="nj-period-analysis">
+          <div className="nj-period-analysis-head">
+            <span className="nj-period-analysis-title">
+              <Activity size={12} /> AI 총정리 · {periodLabel(periodType, refDate)}
+            </span>
+            <button
+              className={`nj-ai-refresh-btn${analyzing ? " spinning" : ""}`}
+              title="AI 총정리 생성 · 새로고침"
+              onClick={requestPeriodAnalysis}
+              disabled={analyzing || periodEntries.length === 0}
+            >
+              <RefreshCw size={13} />
+            </button>
+          </div>
+          {(() => {
+            const key = getPeriodKey(periodType, refDate);
+            const current = periodAnalyses[key];
+            if (analyzing) {
+              return <div className="nj-period-analysis-body muted">이 기간 기록을 분석하는 중...</div>;
+            }
+            if (current && current.analysis) {
+              return (
+                <>
+                  <div className="nj-period-analysis-body">{current.analysis}</div>
+                  <div className="nj-period-analysis-meta">
+                    기록 {current.entryCount}건 기준 · {new Date(current.generatedAt).toLocaleString("ko-KR")}
+                  </div>
+                </>
+              );
+            }
+            return (
+              <div className="nj-period-analysis-body muted">
+                {periodEntries.length === 0
+                  ? "이 기간에 기록이 없어요."
+                  : "이 기간 기록을 바탕으로 AI가 전체 흐름을 정리해줄 수 있어요."}
+                {periodEntries.length > 0 && (
+                  <button className="nj-oneline-btn" onClick={requestPeriodAnalysis}>
+                    지금 생성하기
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
         {periodType === "week" && (
           <div className="nj-export-row">
             <button onClick={handleCopyBlog}>
@@ -742,10 +787,7 @@ export default function NewsJournal() {
               </div>
               <div className="nj-entry-tags">
                 {(e.industryTags || []).map((t) => (
-                  <span
-                    key={"i" + t}
-                    className={`nj-chip industry${(e.aiAddedTags || []).includes(t) ? " ai-added" : ""}`}
-                  >
+                  <span key={"i" + t} className="nj-chip industry">
                     #{t}
                     <button
                       className="nj-chip-remove"
@@ -757,10 +799,7 @@ export default function NewsJournal() {
                   </span>
                 ))}
                 {(e.stockTags || []).map((t) => (
-                  <span
-                    key={"s" + t}
-                    className={`nj-chip stock${(e.aiAddedTags || []).includes(t) ? " ai-added" : ""}`}
-                  >
+                  <span key={"s" + t} className="nj-chip stock">
                     #{t}
                     <button
                       className="nj-chip-remove"
@@ -780,70 +819,6 @@ export default function NewsJournal() {
                   </div>
                 ))}
               </div>
-              {e.oneLiner || summarizing[e.id] ? (
-                <div className="nj-ai-summary">
-                  <div className="nj-ai-summary-head">
-                    <span className="nj-ai-summary-label">
-                      {summarizing[e.id] ? "AI 요약 · 생성 중..." : "AI 요약"}
-                    </span>
-                    {!summarizing[e.id] && (
-                      <button
-                        className="nj-ai-refresh-btn"
-                        title="AI 요약 다시 생성"
-                        onClick={() => requestOneLiner(e)}
-                      >
-                        <RefreshCw size={12} />
-                      </button>
-                    )}
-                  </div>
-                  {e.oneLiner &&
-                    e.oneLiner
-                      .split("\n")
-                      .map((l) => l.trim())
-                      .filter(Boolean)
-                      .map((line, i) => (
-                        <div className="nj-summary-line ai" key={i}>
-                          <span className="nj-summary-marker ai" />
-                          <span>{line}</span>
-                        </div>
-                      ))}
-                  {((e.aiIndustryKeywords && e.aiIndustryKeywords.length > 0) ||
-                    (e.aiStockKeywords && e.aiStockKeywords.length > 0)) && (
-                    <div className="nj-ai-kw-row">
-                      {(e.aiIndustryKeywords || []).map((kw) => (
-                        <span className="nj-ai-kw-chip industry" key={"aki" + kw}>
-                          #{kw}
-                          <button
-                            className="nj-kw-add-btn"
-                            title="산업군 키워드로 추가"
-                            onClick={() => addSuggestedKeyword(e.id, kw, "industry")}
-                          >
-                            !
-                          </button>
-                        </span>
-                      ))}
-                      {(e.aiStockKeywords || []).map((kw) => (
-                        <span className="nj-ai-kw-chip stock" key={"aks" + kw}>
-                          #{kw}
-                          <button
-                            className="nj-kw-add-btn"
-                            title="종목·기술 키워드로 추가"
-                            onClick={() => addSuggestedKeyword(e.id, kw, "stock")}
-                          >
-                            !
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="nj-ai-summary">
-                  <button className="nj-oneline-btn" onClick={() => requestOneLiner(e)}>
-                    AI 요약 생성
-                  </button>
-                </div>
-              )}
               <div className="nj-entry-actions">
                 {confirmDeleteId === e.id ? (
                   <>
