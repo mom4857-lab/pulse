@@ -86,10 +86,22 @@ function scaleOpacity(count, max) {
   if (max <= 1) return 1;
   return (minO + (count / max) * (maxO - minO)).toFixed(2);
 }
+function heatSize(count, max) {
+  const min = 58,
+    maxSize = 168;
+  if (max <= 1) return 96;
+  return Math.round(min + (count / max) * (maxSize - min));
+}
 function hashRotate(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
   return (Math.abs(h) % 9) - 4;
+}
+function tierColor(rankIndex, category) {
+  if (category !== "stock") return "var(--teal)";
+  if (rankIndex < 5) return "var(--tier1)";
+  if (rankIndex < 10) return "var(--tier2)";
+  return "var(--tier3)";
 }
 function decodeEntities(str) {
   const el = document.createElement("textarea");
@@ -118,6 +130,8 @@ export default function NewsJournal() {
   const [editingId, setEditingId] = useState(null);
   const [periodAnalyses, setPeriodAnalyses] = useState({});
   const [analyzing, setAnalyzing] = useState(false);
+  const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+  const [cloudView, setCloudView] = useState("list");
   const listRef = useRef(null);
 
   // form state
@@ -271,10 +285,16 @@ export default function NewsJournal() {
           data && (data.error || data.detail) ? `${data.error || ""} ${data.detail || ""}`.trim() : `status ${res.status}`;
         throw new Error(reason);
       }
-      if (!data.analysis) throw new Error("분석 결과가 비어 있어요.");
+      if (!data.coreFlow && !data.connections && !data.signals) throw new Error("분석 결과가 비어 있어요.");
       const next = {
         ...periodAnalyses,
-        [key]: { analysis: data.analysis, generatedAt: Date.now(), entryCount: periodEntries.length },
+        [key]: {
+          coreFlow: data.coreFlow || "",
+          connections: data.connections || "",
+          signals: data.signals || "",
+          generatedAt: Date.now(),
+          entryCount: periodEntries.length,
+        },
       };
       persistAnalyses(next);
     } catch (e) {
@@ -352,8 +372,12 @@ export default function NewsJournal() {
     const key = getPeriodKey(periodType, refDate);
     const analysis = periodAnalyses[key];
     let text = `📅 ${periodLabel(periodType, refDate)} 뉴스 노트\n\n`;
-    if (analysis && analysis.analysis) {
-      text += `🧠 AI 총정리\n${analysis.analysis}\n\n`;
+    if (analysis && (analysis.coreFlow || analysis.connections || analysis.signals)) {
+      text += `🧠 AI 총정리\n`;
+      if (analysis.coreFlow) text += `▪ 핵심 흐름: ${analysis.coreFlow}\n`;
+      if (analysis.connections) text += `▪ 연결고리 및 반복 주제: ${analysis.connections}\n`;
+      if (analysis.signals) text += `▪ 주목할 신호: ${analysis.signals}\n`;
+      text += "\n";
     }
     periodEntries
       .slice()
@@ -397,6 +421,12 @@ export default function NewsJournal() {
     listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function selectTagAndScroll(tag) {
+    const next = selectedTag === tag ? null : tag;
+    setSelectedTag(next);
+    if (next) scrollToList();
+  }
+
   return (
     <div className="nj-root">
       <style>{`
@@ -412,6 +442,9 @@ export default function NewsJournal() {
           --teal: #2dd4bf;
           --violet: #a78bfa;
           --rose: #fb7185;
+          --tier1: #fb7185;
+          --tier2: #a78bfa;
+          --tier3: #64748b;
           font-family: 'Inter', sans-serif;
           color: var(--text);
           background: var(--bg);
@@ -461,13 +494,42 @@ export default function NewsJournal() {
         .nj-nav { display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
         .nj-nav button { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; width: 28px; height: 28px; cursor: pointer; display:flex; align-items:center; justify-content:center; color: var(--teal); }
         .nj-nav button:hover { background: var(--surface-raised); }
-        .nj-nav .nj-label { min-width: 170px; text-align: center; font-weight: 600; color: var(--text); font-family: 'Inter', sans-serif; }
+        .nj-nav .nj-label {
+          min-width: 170px; text-align: center; font-weight: 600; color: var(--text); font-family: 'Inter', sans-serif;
+          background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: background .15s ease;
+        }
+        .nj-nav .nj-label:hover { background: var(--surface-raised); }
+        .nj-picker-overlay {
+          position: fixed; inset: 0; background: rgba(4,6,10,0.5); display: flex;
+          align-items: flex-start; justify-content: center; z-index: 60; padding-top: 160px;
+        }
+        .nj-picker-box {
+          background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+          box-shadow: 0 20px 50px rgba(0,0,0,0.4); min-width: 220px; animation: nj-pop-in .15s ease;
+        }
+
+        .nj-rank-panel {
+          background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+          padding: 16px 18px; margin-bottom: 14px;
+        }
+        .nj-rank-title { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--text-soft); font-weight: 700; letter-spacing: 0.03em; margin-bottom: 10px; }
+        .nj-rank-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
+        .nj-rank-index { flex: none; width: 18px; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; color: var(--text-soft); text-align: right; }
+        .nj-rank-label { flex: none; width: 108px; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .nj-rank-bar-track { flex: 1; height: 9px; background: var(--surface-raised); border-radius: 5px; overflow: hidden; }
+        .nj-rank-bar-fill { height: 100%; border-radius: 5px; transition: width .25s ease; }
+        .nj-rank-count { flex: none; width: 28px; text-align: right; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; color: var(--text-soft); }
+        .nj-rank-row:hover .nj-rank-label { color: var(--teal); }
+
+        .nj-cloud-panel-wrap { position: relative; margin-bottom: 14px; }
+        .nj-cloud-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .nj-cloud-panel-caption { font-size: 12px; color: var(--text-soft); font-family: 'JetBrains Mono', monospace; }
 
         .nj-cloud-panel {
           background: radial-gradient(120% 140% at 50% 0%, rgba(45,212,191,0.07), transparent 60%), var(--surface);
           border: 1px solid var(--line); border-radius: 14px;
           padding: 32px 20px; min-height: 190px; display: flex; align-items: center; justify-content: center;
-          flex-wrap: wrap; gap: 10px 14px; margin-bottom: 14px; position: relative; overflow: hidden;
+          flex-wrap: wrap; gap: 10px 14px; overflow: hidden; position: relative;
         }
         .nj-cloud-empty { color: var(--text-soft); font-size: 14px; position: relative; z-index: 1; }
         .nj-stamp {
@@ -485,8 +547,18 @@ export default function NewsJournal() {
           font-family: 'JetBrains Mono', monospace; font-weight: 700;
         }
 
-        .nj-cat-industry .nj-stamp { color: var(--teal); box-shadow: 0 0 12px rgba(45,212,191,0.18); }
-        .nj-cat-stock .nj-stamp { color: var(--violet); box-shadow: 0 0 12px rgba(167,139,250,0.18); }
+        .nj-heat-box {
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+          border-radius: 8px; cursor: pointer; transition: transform .15s ease; color: var(--bg); padding: 4px;
+          box-sizing: border-box;
+        }
+        .nj-heat-box:hover { transform: scale(1.04); }
+        .nj-heat-box.selected { outline: 2px solid var(--text); }
+        .nj-heat-tag { font-size: 12px; font-weight: 700; text-align: center; line-height: 1.2; word-break: keep-all; }
+        .nj-heat-count { font-size: 10.5px; font-family: 'JetBrains Mono', monospace; opacity: 0.85; }
+
+        .nj-cat-industry .nj-stamp { box-shadow: 0 0 12px rgba(45,212,191,0.18); }
+        .nj-cat-stock .nj-stamp { box-shadow: 0 0 12px rgba(167,139,250,0.18); }
 
         .nj-export-row { display: flex; gap: 8px; margin-bottom: 22px; }
         .nj-export-row button {
@@ -525,6 +597,9 @@ export default function NewsJournal() {
         .nj-ai-refresh-btn.spinning svg { animation: nj-spin 1s linear infinite; }
         .nj-period-analysis-body { font-size: 13.5px; line-height: 1.75; color: var(--text); white-space: pre-wrap; }
         .nj-period-analysis-body.muted { color: var(--text-soft); font-size: 13px; }
+        .nj-analysis-section { padding: 9px 0; border-bottom: 1px dashed var(--line); }
+        .nj-analysis-section:last-of-type { border-bottom: none; padding-bottom: 4px; }
+        .nj-analysis-section-title { font-size: 11px; font-weight: 700; color: var(--violet); letter-spacing: 0.03em; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
         .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12.5px; cursor: pointer; padding: 0; margin-left: 8px; font-family: 'Inter', sans-serif; }
         .nj-oneline-btn:hover { text-decoration: underline; }
         .nj-period-analysis-meta { font-size: 11px; color: var(--text-soft); margin-top: 8px; font-family: 'JetBrains Mono', monospace; }
@@ -648,7 +723,9 @@ export default function NewsJournal() {
             <button onClick={() => setRefDate(shiftRef(periodType, refDate, -1))}>
               <ChevronLeft size={15} />
             </button>
-            <span className="nj-label">{periodLabel(periodType, refDate)}</span>
+            <button className="nj-label" onClick={() => setShowPeriodPicker(true)}>
+              {periodLabel(periodType, refDate)}
+            </button>
             <button onClick={() => setRefDate(shiftRef(periodType, refDate, 1))}>
               <ChevronRight size={15} />
             </button>
@@ -672,33 +749,159 @@ export default function NewsJournal() {
           </div>
         </div>
 
-        <div className={`nj-cloud-panel ${category === "industry" ? "nj-cat-industry" : "nj-cat-stock"}`}>
-          {!loaded ? (
-            <div className="nj-cloud-empty">불러오는 중...</div>
-          ) : tagCounts.length === 0 ? (
-            <div className="nj-cloud-empty">이 기간에는 아직 {category === "industry" ? "산업군" : "종목·기술"} 키워드가 없어요.</div>
+        {showPeriodPicker && (
+          <div className="nj-picker-overlay" onClick={(e) => e.target === e.currentTarget && setShowPeriodPicker(false)}>
+            <div className="nj-picker-box">
+              {periodType === "year" && (
+                <>
+                  <div className="nj-mini-label">연도 선택</div>
+                  <select
+                    className="nj-input"
+                    value={refDate.getFullYear()}
+                    onChange={(ev) => {
+                      const y = parseInt(ev.target.value, 10);
+                      setRefDate(new Date(y, refDate.getMonth(), 1));
+                      setShowPeriodPicker(false);
+                    }}
+                  >
+                    {Array.from(
+                      new Set([
+                        ...entries.map((e) => new Date(e.date + "T00:00:00").getFullYear()),
+                        new Date().getFullYear(),
+                        refDate.getFullYear(),
+                      ])
+                    )
+                      .sort((a, b) => b - a)
+                      .map((y) => (
+                        <option key={y} value={y}>
+                          {y}년
+                        </option>
+                      ))}
+                  </select>
+                </>
+              )}
+              {periodType === "month" && (
+                <>
+                  <div className="nj-mini-label">월 선택</div>
+                  <input
+                    type="month"
+                    className="nj-input"
+                    value={`${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, "0")}`}
+                    onChange={(ev) => {
+                      const [y, m] = ev.target.value.split("-").map(Number);
+                      if (y && m) {
+                        setRefDate(new Date(y, m - 1, 1));
+                        setShowPeriodPicker(false);
+                      }
+                    }}
+                  />
+                </>
+              )}
+              {periodType === "week" && (
+                <>
+                  <div className="nj-mini-label">이 날짜가 포함된 주로 이동</div>
+                  <input
+                    type="date"
+                    className="nj-input"
+                    defaultValue={`${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, "0")}-${String(
+                      refDate.getDate()
+                    ).padStart(2, "0")}`}
+                    onChange={(ev) => {
+                      if (ev.target.value) {
+                        setRefDate(new Date(ev.target.value + "T00:00:00"));
+                        setShowPeriodPicker(false);
+                      }
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="nj-rank-panel">
+          <div className="nj-rank-title">
+            TOP 10 · {category === "industry" ? "산업군" : "종목·기술"} 키워드
+          </div>
+          {tagCounts.length === 0 ? (
+            <div className="nj-cloud-empty">이 기간에는 아직 키워드가 없어요.</div>
           ) : (
-            tagCounts.map(([tag, count]) => (
-              <span
-                key={tag}
-                className={`nj-stamp${selectedTag === tag ? " selected" : ""}`}
-                style={{
-                  fontSize: scaleSize(count, maxCount),
-                  opacity: selectedTag && selectedTag !== tag ? 0.35 : scaleOpacity(count, maxCount),
-                  transform: `rotate(${hashRotate(tag)}deg)`,
-                }}
-                onClick={() => {
-                  const next = selectedTag === tag ? null : tag;
-                  setSelectedTag(next);
-                  if (next) scrollToList();
-                }}
-                title={`${count}건`}
-              >
-                <span>{tag}</span>
-                <span className="nj-stamp-count">{count}</span>
-              </span>
+            tagCounts.slice(0, 10).map(([tag, count], idx) => (
+              <div className="nj-rank-row" key={tag} onClick={() => selectTagAndScroll(tag)}>
+                <span className="nj-rank-index">{idx + 1}</span>
+                <span className="nj-rank-label">{tag}</span>
+                <div className="nj-rank-bar-track">
+                  <div
+                    className="nj-rank-bar-fill"
+                    style={{ width: `${(count / maxCount) * 100}%`, background: tierColor(idx, category) }}
+                  />
+                </div>
+                <span className="nj-rank-count">{count}</span>
+              </div>
             ))
           )}
+        </div>
+
+        <div className="nj-cloud-panel-wrap">
+          <div className="nj-cloud-panel-head">
+            <span className="nj-cloud-panel-caption">
+              {category === "industry" ? "산업군" : "종목·기술"} 키워드 지도
+            </span>
+            <div className="nj-seg">
+              <button className={cloudView === "list" ? "active" : ""} onClick={() => setCloudView("list")}>
+                나열
+              </button>
+              <button className={cloudView === "heatmap" ? "active" : ""} onClick={() => setCloudView("heatmap")}>
+                히트맵
+              </button>
+            </div>
+          </div>
+          <div className={`nj-cloud-panel ${category === "industry" ? "nj-cat-industry" : "nj-cat-stock"}`}>
+            {!loaded ? (
+              <div className="nj-cloud-empty">불러오는 중...</div>
+            ) : tagCounts.length === 0 ? (
+              <div className="nj-cloud-empty">이 기간에는 아직 {category === "industry" ? "산업군" : "종목·기술"} 키워드가 없어요.</div>
+            ) : cloudView === "list" ? (
+              tagCounts.map(([tag, count], idx) => (
+                <span
+                  key={tag}
+                  className={`nj-stamp${selectedTag === tag ? " selected" : ""}`}
+                  style={{
+                    fontSize: scaleSize(count, maxCount),
+                    opacity: selectedTag && selectedTag !== tag ? 0.35 : scaleOpacity(count, maxCount),
+                    transform: `rotate(${hashRotate(tag)}deg)`,
+                    color: tierColor(idx, category),
+                  }}
+                  onClick={() => selectTagAndScroll(tag)}
+                  title={`${count}건`}
+                >
+                  <span>{tag}</span>
+                  <span className="nj-stamp-count">{count}</span>
+                </span>
+              ))
+            ) : (
+              tagCounts.map(([tag, count], idx) => {
+                const side = heatSize(count, maxCount);
+                return (
+                  <div
+                    key={tag}
+                    className={`nj-heat-box${selectedTag === tag ? " selected" : ""}`}
+                    style={{
+                      width: side,
+                      height: side,
+                      background: tierColor(idx, category),
+                      opacity: selectedTag && selectedTag !== tag ? 0.35 : scaleOpacity(count, maxCount),
+                    }}
+                    onClick={() => selectTagAndScroll(tag)}
+                    title={`${count}건`}
+                  >
+                    <span className="nj-heat-tag">{tag}</span>
+                    <span className="nj-heat-count">{count}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
         <div className="nj-period-analysis">
@@ -721,10 +924,27 @@ export default function NewsJournal() {
             if (analyzing) {
               return <div className="nj-period-analysis-body muted">이 기간 기록을 분석하는 중...</div>;
             }
-            if (current && current.analysis) {
+            if (current && (current.coreFlow || current.connections || current.signals)) {
               return (
                 <>
-                  <div className="nj-period-analysis-body">{current.analysis}</div>
+                  {current.coreFlow && (
+                    <div className="nj-analysis-section">
+                      <div className="nj-analysis-section-title">핵심 흐름</div>
+                      <div className="nj-period-analysis-body">{current.coreFlow}</div>
+                    </div>
+                  )}
+                  {current.connections && (
+                    <div className="nj-analysis-section">
+                      <div className="nj-analysis-section-title">연결고리 및 반복 주제</div>
+                      <div className="nj-period-analysis-body">{current.connections}</div>
+                    </div>
+                  )}
+                  {current.signals && (
+                    <div className="nj-analysis-section">
+                      <div className="nj-analysis-section-title">주목할 신호</div>
+                      <div className="nj-period-analysis-body">{current.signals}</div>
+                    </div>
+                  )}
                   <div className="nj-period-analysis-meta">
                     기록 {current.entryCount}건 기준 · {new Date(current.generatedAt).toLocaleString("ko-KR")}
                   </div>
