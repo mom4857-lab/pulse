@@ -129,6 +129,7 @@ export default function NewsJournal() {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [periodAnalyses, setPeriodAnalyses] = useState({});
+  const [entryKwLoading, setEntryKwLoading] = useState({});
   const [analyzing, setAnalyzing] = useState(false);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const [cloudView, setCloudView] = useState("list");
@@ -213,6 +214,55 @@ export default function NewsJournal() {
     patchEntry(entryId, (e) => ({
       [field]: (e[field] || []).filter((t) => t !== tag),
     }));
+  }
+
+  async function requestEntryKeywords(entry) {
+    setEntryKwLoading((s) => ({ ...s, [entry.id]: true }));
+    try {
+      const bulletText = parseSummaryLines(entry.summary).join(" / ");
+      const res = await fetch("/api/entry-keywords", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: entry.url || "", text: bulletText }),
+      });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        throw new Error(`서버 응답을 읽을 수 없어요 (status ${res.status})`);
+      }
+      if (!res.ok) {
+        const reason =
+          data && (data.error || data.detail) ? `${data.error || ""} ${data.detail || ""}`.trim() : `status ${res.status}`;
+        throw new Error(reason);
+      }
+      patchEntry(entry.id, {
+        aiIndustryKeywords: Array.isArray(data.industryKeywords) ? data.industryKeywords : [],
+        aiStockKeywords: Array.isArray(data.stockKeywords) ? data.stockKeywords : [],
+      });
+    } catch (e) {
+      showToast(`AI 키워드 추천 실패: ${String(e.message || e).slice(0, 160)}`, 9000);
+    } finally {
+      setEntryKwLoading((s) => {
+        const next = { ...s };
+        delete next[entry.id];
+        return next;
+      });
+    }
+  }
+
+  function addSuggestedKeyword(entryId, keyword, category) {
+    const field = category === "industry" ? "industryTags" : "stockTags";
+    const suggestField = category === "industry" ? "aiIndustryKeywords" : "aiStockKeywords";
+    patchEntry(entryId, (e) => {
+      const current = e[field] || [];
+      const alreadyThere = current.some((t) => t.toLowerCase() === keyword.toLowerCase());
+      return {
+        [field]: alreadyThere ? current : [...current, keyword],
+        [suggestField]: (e[suggestField] || []).filter((k) => k !== keyword),
+      };
+    });
+    showToast(`#${keyword} 키워드를 추가했어요.`);
   }
 
   function resetForm() {
@@ -317,6 +367,8 @@ export default function NewsJournal() {
     }
     if (editingId) {
       const original = entries.find((e) => e.id === editingId);
+      const summaryChanged = original && original.summary !== fSummary.trim();
+      const urlChanged = original && (original.url || "") !== fUrl.trim();
       const updatedEntry = {
         ...original,
         date: fDate,
@@ -331,6 +383,7 @@ export default function NewsJournal() {
       resetForm();
       setShowForm(false);
       showToast("기록을 수정했어요.");
+      if (summaryChanged || urlChanged) requestEntryKeywords(updatedEntry);
       return;
     }
     const entry = {
@@ -347,6 +400,7 @@ export default function NewsJournal() {
     resetForm();
     setShowForm(false);
     showToast("기록을 저장했어요.");
+    requestEntryKeywords(entry);
   }
 
   function handleDelete(id) {
@@ -613,6 +667,22 @@ export default function NewsJournal() {
         .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12.5px; cursor: pointer; padding: 0; margin-left: 8px; font-family: 'Inter', sans-serif; }
         .nj-oneline-btn:hover { text-decoration: underline; }
         .nj-period-analysis-meta { font-size: 11px; color: var(--text-soft); margin-top: 8px; font-family: 'JetBrains Mono', monospace; }
+        .nj-entry-ai-kw { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+        .nj-entry-ai-kw-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+        .nj-entry-ai-kw-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--violet); font-weight: 700; letter-spacing: 0.03em; }
+        .nj-ai-kw-row { display: flex; flex-wrap: wrap; gap: 6px; }
+        .nj-ai-kw-chip {
+          display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 5px 3px 10px;
+          border-radius: 999px; font-family: 'JetBrains Mono', monospace; border: 1px dashed;
+        }
+        .nj-ai-kw-chip.industry { color: var(--teal); border-color: rgba(45,212,191,0.45); background: rgba(45,212,191,0.06); }
+        .nj-ai-kw-chip.stock { color: var(--violet); border-color: rgba(167,139,250,0.45); background: rgba(167,139,250,0.06); }
+        .nj-kw-add-btn {
+          border: none; background: rgba(255,255,255,0.1); color: inherit; width: 16px; height: 16px; border-radius: 50%;
+          font-size: 10px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          line-height: 1; padding: 0; font-family: 'Inter', sans-serif;
+        }
+        .nj-kw-add-btn:hover { background: currentColor; color: var(--bg); }
         .nj-entry-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
         .nj-chip {
           display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 5px 2px 9px;
@@ -1062,6 +1132,54 @@ export default function NewsJournal() {
                     <span>{line}</span>
                   </div>
                 ))}
+              </div>
+              <div className="nj-entry-ai-kw">
+                <div className="nj-entry-ai-kw-head">
+                  <span className="nj-entry-ai-kw-label">AI 추천 키워드</span>
+                  <button
+                    className={`nj-ai-refresh-btn${entryKwLoading[e.id] ? " spinning" : ""}`}
+                    title="AI 키워드 추천 생성 · 새로고침"
+                    onClick={() => requestEntryKeywords(e)}
+                    disabled={entryKwLoading[e.id]}
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                </div>
+                {entryKwLoading[e.id] ? (
+                  <div className="nj-period-analysis-body muted">뉴스 링크를 읽는 중...</div>
+                ) : (e.aiIndustryKeywords && e.aiIndustryKeywords.length > 0) ||
+                  (e.aiStockKeywords && e.aiStockKeywords.length > 0) ? (
+                  <div className="nj-ai-kw-row">
+                    {(e.aiIndustryKeywords || []).map((kw) => (
+                      <span className="nj-ai-kw-chip industry" key={"eaki" + kw}>
+                        #{kw}
+                        <button
+                          className="nj-kw-add-btn"
+                          title="산업군 키워드로 추가"
+                          onClick={() => addSuggestedKeyword(e.id, kw, "industry")}
+                        >
+                          !
+                        </button>
+                      </span>
+                    ))}
+                    {(e.aiStockKeywords || []).map((kw) => (
+                      <span className="nj-ai-kw-chip stock" key={"eaks" + kw}>
+                        #{kw}
+                        <button
+                          className="nj-kw-add-btn"
+                          title="종목·기술 키워드로 추가"
+                          onClick={() => addSuggestedKeyword(e.id, kw, "stock")}
+                        >
+                          !
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <button className="nj-oneline-btn" onClick={() => requestEntryKeywords(e)}>
+                    지금 추천받기
+                  </button>
+                )}
               </div>
               <div className="nj-entry-actions">
                 {confirmDeleteId === e.id ? (
