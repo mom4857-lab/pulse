@@ -398,6 +398,24 @@ export default function NewsJournal() {
     setInput("");
   }
 
+  function getKeywordSuggestions(query, allTags, currentTags) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const already = new Set(currentTags.map((t) => t.toLowerCase()));
+    const seen = new Set();
+    const matches = [];
+    for (const tag of allTags) {
+      const tagLower = tag.toLowerCase();
+      if (already.has(tagLower) || seen.has(tagLower)) continue;
+      if (tagLower.includes(q)) {
+        matches.push(tag);
+        seen.add(tagLower);
+      }
+      if (matches.length >= 6) break;
+    }
+    return matches;
+  }
+
   const [editingSection, setEditingSection] = useState(null);
   const [editingSectionText, setEditingSectionText] = useState("");
 
@@ -543,6 +561,9 @@ export default function NewsJournal() {
     setConfirmDeleteId(null);
     showToast("삭제했어요.");
   }
+
+  const allIndustryTagsUsed = Array.from(new Set(entries.flatMap((e) => e.industryTags || [])));
+  const allStockTagsUsed = Array.from(new Set(entries.flatMap((e) => e.stockTags || [])));
 
   const periodEntries = entries.filter((e) => isInPeriod(e.date, periodType, refDate));
   const displayedEntries = (selectedTag
@@ -890,6 +911,14 @@ export default function NewsJournal() {
         .nj-field-gap { margin-top: 8px; }
         .nj-mini-label { font-size: 11.5px; color: var(--text-soft); margin-bottom: 4px; }
         .nj-chips-input { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .nj-kw-suggest-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .nj-kw-suggest-item {
+          font-size: 11.5px; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--line);
+          background: var(--surface-raised); color: var(--text-soft); cursor: pointer; font-family: 'JetBrains Mono', monospace;
+          transition: border-color .15s ease, color .15s ease;
+        }
+        .nj-kw-suggest-item.industry:hover { border-color: var(--teal); color: var(--teal); }
+        .nj-kw-suggest-item.stock:hover { border-color: var(--violet); color: var(--violet); }
         .nj-chip-editable {
           display: flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 8px 3px 10px;
           border-radius: 999px; font-family: 'JetBrains Mono', monospace;
@@ -1477,6 +1506,24 @@ export default function NewsJournal() {
                   }}
                 />
               </div>
+              {(() => {
+                const suggestions = getKeywordSuggestions(fIndustryInput, allIndustryTagsUsed, fIndustryTags);
+                return (
+                  suggestions.length > 0 && (
+                    <div className="nj-kw-suggest-list">
+                      {suggestions.map((s) => (
+                        <button
+                          key={s}
+                          className="nj-kw-suggest-item industry"
+                          onClick={() => addChip(s, setFIndustryInput, fIndustryTags, setFIndustryTags)}
+                        >
+                          #{s}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                );
+              })()}
               <div className="nj-chips-input">
                 {fIndustryTags.map((t) => (
                   <span key={t} className="nj-chip-editable industry">
@@ -1505,6 +1552,24 @@ export default function NewsJournal() {
                   }}
                 />
               </div>
+              {(() => {
+                const suggestions = getKeywordSuggestions(fStockInput, allStockTagsUsed, fStockTags);
+                return (
+                  suggestions.length > 0 && (
+                    <div className="nj-kw-suggest-list">
+                      {suggestions.map((s) => (
+                        <button
+                          key={s}
+                          className="nj-kw-suggest-item stock"
+                          onClick={() => addChip(s, setFStockInput, fStockTags, setFStockTags)}
+                        >
+                          #{s}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                );
+              })()}
               <div className="nj-chips-input">
                 {fStockTags.map((t) => (
                   <span key={t} className="nj-chip-editable stock">
