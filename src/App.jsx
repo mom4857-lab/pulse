@@ -115,6 +115,21 @@ function parseSummaryLines(summary) {
     .filter(Boolean)
     .map((line) => line.replace(/^([*\-•]|\d+[).])\s*/, ""));
 }
+function splitKoreanSentences(text) {
+  if (!text) return [];
+  return text
+    .split(/(?<=다[.!?])\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+function makeLineId() {
+  return "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function linesFromSummaryText(summary) {
+  const parsed = parseSummaryLines(summary);
+  if (parsed.length === 0) return [{ id: makeLineId(), text: "" }];
+  return parsed.map((text) => ({ id: makeLineId(), text }));
+}
 
 export default function NewsJournal() {
   const [entries, setEntries] = useState([]);
@@ -144,7 +159,8 @@ export default function NewsJournal() {
   const [fStockInput, setFStockInput] = useState("");
   const [fIndustryTags, setFIndustryTags] = useState([]);
   const [fStockTags, setFStockTags] = useState([]);
-  const [fSummary, setFSummary] = useState("");
+  const [fSummaryLines, setFSummaryLines] = useState(() => [{ id: makeLineId(), text: "" }]);
+  const lineInputRefs = useRef({});
 
   useEffect(() => {
     (async () => {
@@ -274,7 +290,8 @@ export default function NewsJournal() {
     setFStockInput("");
     setFIndustryTags([]);
     setFStockTags([]);
-    setFSummary("");
+    setFSummaryLines([{ id: makeLineId(), text: "" }]);
+    lineInputRefs.current = {};
   }
 
   function openEdit(entry) {
@@ -286,8 +303,69 @@ export default function NewsJournal() {
     setFStockInput("");
     setFIndustryTags(entry.industryTags || []);
     setFStockTags(entry.stockTags || []);
-    setFSummary(entry.summary || "");
+    setFSummaryLines(linesFromSummaryText(entry.summary || ""));
+    lineInputRefs.current = {};
     setShowForm(true);
+  }
+
+  function updateLineText(id, text) {
+    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, text } : l)));
+  }
+
+  function handleLineKeyDown(id, e) {
+    const idx = fSummaryLines.findIndex((l) => l.id === id);
+    if (idx === -1) return;
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const input = e.target;
+      const cursor = input.selectionStart ?? fSummaryLines[idx].text.length;
+      const text = fSummaryLines[idx].text;
+      const before = text.slice(0, cursor);
+      const after = text.slice(cursor);
+      const newId = makeLineId();
+      const newLines = fSummaryLines.slice();
+      newLines[idx] = { ...newLines[idx], text: before };
+      newLines.splice(idx + 1, 0, { id: newId, text: after });
+      setFSummaryLines(newLines);
+      requestAnimationFrame(() => {
+        const el = lineInputRefs.current[newId];
+        if (el) {
+          el.focus();
+          el.setSelectionRange(0, 0);
+        }
+      });
+    } else if (e.key === "Backspace") {
+      const input = e.target;
+      if (input.selectionStart === 0 && input.selectionEnd === 0 && idx > 0) {
+        e.preventDefault();
+        const prevLine = fSummaryLines[idx - 1];
+        const mergedText = prevLine.text + fSummaryLines[idx].text;
+        const mergeCursor = prevLine.text.length;
+        const newLines = fSummaryLines.filter((_, i) => i !== idx);
+        newLines[idx - 1] = { ...prevLine, text: mergedText };
+        setFSummaryLines(newLines);
+        requestAnimationFrame(() => {
+          const el = lineInputRefs.current[prevLine.id];
+          if (el) {
+            el.focus();
+            el.setSelectionRange(mergeCursor, mergeCursor);
+          }
+        });
+      }
+    } else if (e.key === "ArrowUp") {
+      if (idx > 0) {
+        e.preventDefault();
+        const targetId = fSummaryLines[idx - 1].id;
+        requestAnimationFrame(() => lineInputRefs.current[targetId]?.focus());
+      }
+    } else if (e.key === "ArrowDown") {
+      if (idx < fSummaryLines.length - 1) {
+        e.preventDefault();
+        const targetId = fSummaryLines[idx + 1].id;
+        requestAnimationFrame(() => lineInputRefs.current[targetId]?.focus());
+      }
+    }
   }
 
   function addChip(input, setInput, tags, setTags) {
@@ -357,6 +435,10 @@ export default function NewsJournal() {
   }
 
   function handleSave() {
+    const fSummary = fSummaryLines
+      .map((l) => l.text.trim())
+      .filter(Boolean)
+      .join("\n");
     if (!fTitle.trim() && !fUrl.trim()) {
       showToast("제목이나 뉴스 링크 중 하나는 입력해주세요.");
       return;
@@ -656,9 +738,20 @@ export default function NewsJournal() {
         .nj-ai-refresh-btn.spinning svg { animation: nj-spin 1s linear infinite; }
         .nj-period-analysis-body { font-size: 13.5px; line-height: 1.75; color: var(--text); white-space: pre-wrap; }
         .nj-period-analysis-body.muted { color: var(--text-soft); font-size: 13px; }
-        .nj-analysis-section { padding: 9px 0; border-bottom: 1px dashed var(--line); }
+        .nj-analysis-section { padding: 9px 0 9px 12px; border-bottom: 1px dashed var(--line); border-left: 3px solid transparent; margin-bottom: 2px; }
         .nj-analysis-section:last-of-type { border-bottom: none; padding-bottom: 4px; }
-        .nj-analysis-section-title { font-size: 11px; font-weight: 700; color: var(--violet); letter-spacing: 0.03em; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+        .nj-analysis-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.03em; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+        .nj-analysis-section.core { border-left-color: var(--teal); }
+        .nj-analysis-section.core .nj-analysis-section-title { color: var(--teal); }
+        .nj-analysis-section.core .nj-summary-marker { background: var(--teal); }
+        .nj-analysis-section.connections { border-left-color: var(--violet); }
+        .nj-analysis-section.connections .nj-analysis-section-title { color: var(--violet); }
+        .nj-analysis-section.connections .nj-summary-marker { background: var(--violet); }
+        .nj-analysis-section.signals { border-left-color: var(--rose); }
+        .nj-analysis-section.signals .nj-analysis-section-title { color: var(--rose); }
+        .nj-analysis-section.signals .nj-summary-marker { background: var(--rose); }
+        .nj-analysis-section.keywords { border-left-color: #f2b84b; }
+        .nj-analysis-section.keywords .nj-analysis-section-title { color: #f2b84b; }
         .nj-period-kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
         .nj-period-kw-chip {
           font-size: 12px; padding: 3px 10px; border-radius: 999px; font-family: 'JetBrains Mono', monospace;
@@ -724,6 +817,16 @@ export default function NewsJournal() {
         }
         .nj-input:focus, .nj-textarea:focus, .nj-date:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
         .nj-textarea { min-height: 110px; resize: vertical; font-family: 'Inter', sans-serif; }
+        .nj-bullet-editor {
+          border: 1px solid var(--line); background: var(--surface-raised); border-radius: 8px;
+          padding: 8px 10px; min-height: 110px;
+        }
+        .nj-bullet-row { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
+        .nj-bullet-input {
+          flex: 1; border: none; background: none; outline: none; color: var(--text);
+          font-family: 'Inter', sans-serif; font-size: 13.5px; padding: 2px 0;
+        }
+        .nj-bullet-input::placeholder { color: var(--text-soft); }
         .nj-field-gap { margin-top: 8px; }
         .nj-mini-label { font-size: 11.5px; color: var(--text-soft); margin-bottom: 4px; }
         .nj-chips-input { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -1010,25 +1113,46 @@ export default function NewsJournal() {
               return (
                 <>
                   {current.coreFlow && (
-                    <div className="nj-analysis-section">
+                    <div className="nj-analysis-section core">
                       <div className="nj-analysis-section-title">핵심 흐름</div>
-                      <div className="nj-period-analysis-body">{current.coreFlow}</div>
+                      <div className="nj-period-analysis-body">
+                        {splitKoreanSentences(current.coreFlow).map((sentence, i) => (
+                          <div className="nj-summary-line" key={i}>
+                            <span className="nj-summary-marker" />
+                            <span>{sentence}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {current.connections && (
-                    <div className="nj-analysis-section">
+                    <div className="nj-analysis-section connections">
                       <div className="nj-analysis-section-title">연결고리 및 반복 주제</div>
-                      <div className="nj-period-analysis-body">{current.connections}</div>
+                      <div className="nj-period-analysis-body">
+                        {splitKoreanSentences(current.connections).map((sentence, i) => (
+                          <div className="nj-summary-line" key={i}>
+                            <span className="nj-summary-marker" />
+                            <span>{sentence}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {current.signals && (
-                    <div className="nj-analysis-section">
+                    <div className="nj-analysis-section signals">
                       <div className="nj-analysis-section-title">주목할 신호</div>
-                      <div className="nj-period-analysis-body">{current.signals}</div>
+                      <div className="nj-period-analysis-body">
+                        {splitKoreanSentences(current.signals).map((sentence, i) => (
+                          <div className="nj-summary-line" key={i}>
+                            <span className="nj-summary-marker" />
+                            <span>{sentence}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {current.keywords && current.keywords.length > 0 && (
-                    <div className="nj-analysis-section">
+                    <div className="nj-analysis-section keywords">
                       <div className="nj-analysis-section-title">관련 키워드 추천 (기사 본문 기반)</div>
                       <div className="nj-period-kw-row">
                         {current.keywords.map((kw) => (
@@ -1311,14 +1435,25 @@ export default function NewsJournal() {
             <div className="nj-section">
               <div className="nj-section-label">3. 뉴스 요약 (직접 작성)</div>
               <div className="nj-mini-label" style={{ marginBottom: 6 }}>
-                엔터로 문단을 나눠서 적어보면 나중에 읽기 편해요. 예: 1) ... ↵ 2) ...
+                엔터를 누르면 자동으로 다음 줄이 생겨요. 한 줄에 한 문장씩 적어보세요.
               </div>
-              <textarea
-                className="nj-textarea"
-                placeholder={"이 뉴스를 왜 중요하다고 봤는지 적어주세요.\n1) ...\n2) ..."}
-                value={fSummary}
-                onChange={(ev) => setFSummary(ev.target.value)}
-              />
+              <div className="nj-bullet-editor">
+                {fSummaryLines.map((line, i) => (
+                  <div className="nj-bullet-row" key={line.id}>
+                    <span className="nj-summary-marker" />
+                    <input
+                      ref={(el) => {
+                        if (el) lineInputRefs.current[line.id] = el;
+                      }}
+                      className="nj-bullet-input"
+                      value={line.text}
+                      onChange={(ev) => updateLineText(line.id, ev.target.value)}
+                      onKeyDown={(ev) => handleLineKeyDown(line.id, ev)}
+                      placeholder={i === 0 ? "이 뉴스를 왜 중요하다고 봤는지 적어주세요" : ""}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             <button className="nj-savebtn" onClick={handleSave}>
