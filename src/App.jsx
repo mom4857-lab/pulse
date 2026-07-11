@@ -636,7 +636,7 @@ export default function NewsJournal() {
         }
         .nj-modal {
           display: inline-block; text-align: left; vertical-align: top;
-          background: var(--surface); border: 1px solid var(--line); border-radius: 16px; width: 520px; max-width: 92vw;
+          background: var(--surface); border: 1px solid var(--line); border-radius: 16px; width: 1060px; max-width: 92vw;
           height: auto; max-height: 80vh; min-width: 340px; min-height: 320px; overflow: auto;
           padding: 22px 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
           animation: nj-pop-in .18s ease; resize: both;
