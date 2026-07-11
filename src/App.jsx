@@ -72,7 +72,7 @@ function tagsForCategory(entry, category) {
 function categoryLabel(category) {
   if (category === "industry") return "산업군";
   if (category === "stock") return "종목";
-  return "기술";
+  return "기술/제품/기타";
 }
 function getTagCounts(list, category) {
   const counts = {};
@@ -627,7 +627,7 @@ export default function NewsJournal() {
     text += `---\n📊 이번 기간 주요 키워드\n`;
     text += `산업군: ${industryCounts.map(([t, c]) => `${t}(${c})`).join(", ") || "없음"}\n`;
     text += `종목: ${stockCounts.map(([t, c]) => `${t}(${c})`).join(", ") || "없음"}\n`;
-    text += `기술: ${techCounts.map(([t, c]) => `${t}(${c})`).join(", ") || "없음"}\n`;
+    text += `기술/제품/기타: ${techCounts.map(([t, c]) => `${t}(${c})`).join(", ") || "없음"}\n`;
     return text;
   }
 
@@ -1034,7 +1034,7 @@ export default function NewsJournal() {
             {[
               ["industry", "산업군"],
               ["stock", "종목"],
-              ["tech", "기술"],
+              ["tech", "기술/제품/기타"],
             ].map(([val, label]) => (
               <button
                 key={val}
@@ -1633,7 +1633,7 @@ export default function NewsJournal() {
               </div>
 
               <div className="nj-mini-label" style={{ marginTop: 12 }}>
-                기술
+                기술/제품/기타
               </div>
               <div className="nj-row">
                 <input
