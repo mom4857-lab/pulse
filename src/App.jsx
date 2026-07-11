@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw } from "lucide-react";
+import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil } from "lucide-react";
 import { storage } from "./storage.js";
 
 const STORAGE_KEY = "news-journal-entries";
@@ -108,12 +108,25 @@ function decodeEntities(str) {
   el.innerHTML = str;
   return el.value;
 }
+const NO_MARKER_PREFIX = "\u2063";
 function parseSummaryLines(summary) {
   return (summary || "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
+    .map((line) => (line.startsWith(NO_MARKER_PREFIX) ? line.slice(NO_MARKER_PREFIX.length) : line))
     .map((line) => line.replace(/^([*\-•]|\d+[).])\s*/, ""));
+}
+function parseSummaryLinesRich(summary) {
+  return (summary || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const noMarker = line.startsWith(NO_MARKER_PREFIX);
+      const clean = (noMarker ? line.slice(NO_MARKER_PREFIX.length) : line).replace(/^([*\-•]|\d+[).])\s*/, "");
+      return { text: clean, noMarker };
+    });
 }
 function splitKoreanSentences(text) {
   if (!text) return [];
@@ -126,9 +139,9 @@ function makeLineId() {
   return "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 function linesFromSummaryText(summary) {
-  const parsed = parseSummaryLines(summary);
-  if (parsed.length === 0) return [{ id: makeLineId(), text: "" }];
-  return parsed.map((text) => ({ id: makeLineId(), text }));
+  const parsed = parseSummaryLinesRich(summary);
+  if (parsed.length === 0) return [{ id: makeLineId(), text: "", noMarker: false }];
+  return parsed.map(({ text, noMarker }) => ({ id: makeLineId(), text, noMarker }));
 }
 
 export default function NewsJournal() {
@@ -316,6 +329,12 @@ export default function NewsJournal() {
     const idx = fSummaryLines.findIndex((l) => l.id === id);
     if (idx === -1) return;
 
+    if (e.key === "Enter" && e.altKey) {
+      e.preventDefault();
+      setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, noMarker: !l.noMarker } : l)));
+      return;
+    }
+
     if (e.key === "Enter") {
       e.preventDefault();
       const input = e.target;
@@ -379,6 +398,40 @@ export default function NewsJournal() {
     setInput("");
   }
 
+  const [editingSection, setEditingSection] = useState(null);
+  const [editingSectionText, setEditingSectionText] = useState("");
+
+  useEffect(() => {
+    setEditingSection(null);
+  }, [periodType, refDate]);
+
+  function startEditSection(field, currentValue) {
+    setEditingSection(field);
+    setEditingSectionText(field === "keywords" ? (currentValue || []).join(", ") : currentValue || "");
+  }
+
+  function cancelEditSection() {
+    setEditingSection(null);
+  }
+
+  function saveEditSection() {
+    const key = getPeriodKey(periodType, refDate);
+    const current = periodAnalyses[key] || {};
+    let value;
+    if (editingSection === "keywords") {
+      value = editingSectionText
+        .split(/[,\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 5);
+    } else {
+      value = editingSectionText.trim();
+    }
+    const next = { ...periodAnalyses, [key]: { ...current, [editingSection]: value } };
+    persistAnalyses(next);
+    setEditingSection(null);
+  }
+
   async function requestPeriodAnalysis() {
     if (periodEntries.length === 0) {
       showToast("이 기간에는 분석할 기록이 없어요.");
@@ -393,7 +446,7 @@ export default function NewsJournal() {
           date: e.date,
           title: e.title,
           url: e.url,
-          summary: e.summary,
+          summary: parseSummaryLines(e.summary).join("\n"),
           industryTags: e.industryTags || [],
           stockTags: e.stockTags || [],
         })),
@@ -436,8 +489,8 @@ export default function NewsJournal() {
 
   function handleSave() {
     const fSummary = fSummaryLines
-      .map((l) => l.text.trim())
-      .filter(Boolean)
+      .filter((l) => l.text.trim())
+      .map((l) => (l.noMarker ? NO_MARKER_PREFIX : "") + l.text.trim())
       .join("\n");
     if (!fTitle.trim() && !fUrl.trim()) {
       showToast("제목이나 뉴스 링크 중 하나는 입력해주세요.");
@@ -525,7 +578,7 @@ export default function NewsJournal() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((e) => {
         text += `[${e.date}] ${e.title}\n`;
-        text += `${e.summary}\n`;
+        text += `${parseSummaryLines(e.summary).join("\n")}\n`;
         if (e.url) text += `🔗 ${e.url}\n`;
         const allTags = [...(e.industryTags || []), ...(e.stockTags || [])];
         if (allTags.length) text += allTags.map((t) => "#" + t).join(" ") + "\n";
@@ -741,6 +794,13 @@ export default function NewsJournal() {
         .nj-analysis-section { padding: 9px 0 9px 12px; border-bottom: 1px dashed var(--line); border-left: 3px solid transparent; margin-bottom: 2px; }
         .nj-analysis-section:last-of-type { border-bottom: none; padding-bottom: 4px; }
         .nj-analysis-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.03em; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+        .nj-analysis-section-title-row { display: flex; align-items: center; justify-content: space-between; }
+        .nj-section-edit-btn { border: none; background: none; color: var(--text-soft); cursor: pointer; opacity: 0.55; padding: 2px; display: flex; align-items: center; transition: opacity .15s ease, color .15s ease; }
+        .nj-section-edit-btn:hover { opacity: 1; color: var(--teal); }
+        .nj-section-edit-box { margin-top: 4px; }
+        .nj-section-edit-box .nj-textarea { min-height: 70px; }
+        .nj-section-edit-actions { display: flex; gap: 12px; margin-top: 6px; }
+        .nj-oneline-btn.muted { color: var(--text-soft); }
         .nj-analysis-section.core { border-left-color: var(--teal); }
         .nj-analysis-section.core .nj-analysis-section-title { color: var(--teal); }
         .nj-analysis-section.core .nj-summary-marker { background: var(--teal); }
@@ -1110,57 +1170,95 @@ export default function NewsJournal() {
               return <div className="nj-period-analysis-body muted">이 기간 기록을 분석하는 중...</div>;
             }
             if (current && (current.coreFlow || current.connections || current.signals)) {
+              const renderTextSection = (field, title, cls) => {
+                const value = current[field];
+                if (!value && editingSection !== field) return null;
+                return (
+                  <div className={`nj-analysis-section ${cls}`} key={field}>
+                    <div className="nj-analysis-section-title-row">
+                      <div className="nj-analysis-section-title">{title}</div>
+                      {editingSection !== field && (
+                        <button className="nj-section-edit-btn" title="직접 수정" onClick={() => startEditSection(field, value)}>
+                          <Pencil size={11} />
+                        </button>
+                      )}
+                    </div>
+                    {editingSection === field ? (
+                      <div className="nj-section-edit-box">
+                        <textarea
+                          className="nj-textarea"
+                          value={editingSectionText}
+                          onChange={(ev) => setEditingSectionText(ev.target.value)}
+                          autoFocus
+                        />
+                        <div className="nj-section-edit-actions">
+                          <button className="nj-oneline-btn" onClick={saveEditSection}>
+                            저장
+                          </button>
+                          <button className="nj-oneline-btn muted" onClick={cancelEditSection}>
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="nj-period-analysis-body">
+                        {splitKoreanSentences(value).map((sentence, i) => (
+                          <div className="nj-summary-line" key={i}>
+                            <span className="nj-summary-marker" />
+                            <span>{sentence}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
               return (
                 <>
-                  {current.coreFlow && (
-                    <div className="nj-analysis-section core">
-                      <div className="nj-analysis-section-title">핵심 흐름</div>
-                      <div className="nj-period-analysis-body">
-                        {splitKoreanSentences(current.coreFlow).map((sentence, i) => (
-                          <div className="nj-summary-line" key={i}>
-                            <span className="nj-summary-marker" />
-                            <span>{sentence}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {current.connections && (
-                    <div className="nj-analysis-section connections">
-                      <div className="nj-analysis-section-title">연결고리 및 반복 주제</div>
-                      <div className="nj-period-analysis-body">
-                        {splitKoreanSentences(current.connections).map((sentence, i) => (
-                          <div className="nj-summary-line" key={i}>
-                            <span className="nj-summary-marker" />
-                            <span>{sentence}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {current.signals && (
-                    <div className="nj-analysis-section signals">
-                      <div className="nj-analysis-section-title">주목할 신호</div>
-                      <div className="nj-period-analysis-body">
-                        {splitKoreanSentences(current.signals).map((sentence, i) => (
-                          <div className="nj-summary-line" key={i}>
-                            <span className="nj-summary-marker" />
-                            <span>{sentence}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {current.keywords && current.keywords.length > 0 && (
+                  {renderTextSection("coreFlow", "핵심 흐름", "core")}
+                  {renderTextSection("connections", "연결고리 및 반복 주제", "connections")}
+                  {renderTextSection("signals", "주목할 신호", "signals")}
+                  {(current.keywords?.length > 0 || editingSection === "keywords") && (
                     <div className="nj-analysis-section keywords">
-                      <div className="nj-analysis-section-title">관련 키워드 추천 (기사 본문 기반)</div>
-                      <div className="nj-period-kw-row">
-                        {current.keywords.map((kw) => (
-                          <span className="nj-period-kw-chip" key={kw}>
-                            #{kw}
-                          </span>
-                        ))}
+                      <div className="nj-analysis-section-title-row">
+                        <div className="nj-analysis-section-title">관련 키워드 추천 (기사 본문 기반)</div>
+                        {editingSection !== "keywords" && (
+                          <button
+                            className="nj-section-edit-btn"
+                            title="직접 수정"
+                            onClick={() => startEditSection("keywords", current.keywords)}
+                          >
+                            <Pencil size={11} />
+                          </button>
+                        )}
                       </div>
+                      {editingSection === "keywords" ? (
+                        <div className="nj-section-edit-box">
+                          <input
+                            className="nj-input"
+                            value={editingSectionText}
+                            onChange={(ev) => setEditingSectionText(ev.target.value)}
+                            placeholder="쉼표로 구분해서 입력 (최대 5개)"
+                            autoFocus
+                          />
+                          <div className="nj-section-edit-actions">
+                            <button className="nj-oneline-btn" onClick={saveEditSection}>
+                              저장
+                            </button>
+                            <button className="nj-oneline-btn muted" onClick={cancelEditSection}>
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="nj-period-kw-row">
+                          {current.keywords.map((kw) => (
+                            <span className="nj-period-kw-chip" key={kw}>
+                              #{kw}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   <div className="nj-period-analysis-meta">
@@ -1250,10 +1348,10 @@ export default function NewsJournal() {
                 ))}
               </div>
               <div className="nj-entry-summary">
-                {parseSummaryLines(e.summary).map((line, i) => (
+                {parseSummaryLinesRich(e.summary).map((line, i) => (
                   <div className="nj-summary-line" key={i}>
-                    <span className="nj-summary-marker" />
-                    <span>{line}</span>
+                    <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
+                    <span>{line.text}</span>
                   </div>
                 ))}
               </div>
@@ -1435,12 +1533,12 @@ export default function NewsJournal() {
             <div className="nj-section">
               <div className="nj-section-label">3. 뉴스 요약 (직접 작성)</div>
               <div className="nj-mini-label" style={{ marginBottom: 6 }}>
-                엔터를 누르면 자동으로 다음 줄이 생겨요. 한 줄에 한 문장씩 적어보세요.
+                엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요.
               </div>
               <div className="nj-bullet-editor">
                 {fSummaryLines.map((line, i) => (
                   <div className="nj-bullet-row" key={line.id}>
-                    <span className="nj-summary-marker" />
+                    <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
                     <input
                       ref={(el) => {
                         if (el) lineInputRefs.current[line.id] = el;
