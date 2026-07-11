@@ -133,6 +133,7 @@ export default function NewsJournal() {
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const [cloudView, setCloudView] = useState("list");
   const listRef = useRef(null);
+  const overlayMouseDownOnBackdrop = useRef(false);
 
   // form state
   const [fUrl, setFUrl] = useState("");
@@ -633,7 +634,6 @@ export default function NewsJournal() {
           position: fixed; inset: 0; background: rgba(4,6,10,0.65); backdrop-filter: blur(3px);
           z-index: 50; overflow: auto; text-align: center; padding: 48px 16px;
         }
-        .nj-modal-overlay::before { content: ""; display: inline-block; height: 1px; width: 0; }
         .nj-modal {
           display: inline-block; text-align: left; vertical-align: top;
           background: var(--surface); border: 1px solid var(--line); border-radius: 16px; width: 520px; max-width: 92vw;
@@ -1085,8 +1085,11 @@ export default function NewsJournal() {
       {showForm && (
         <div
           className="nj-modal-overlay"
+          onMouseDown={(e) => {
+            overlayMouseDownOnBackdrop.current = e.target === e.currentTarget;
+          }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) {
+            if (e.target === e.currentTarget && overlayMouseDownOnBackdrop.current) {
               setShowForm(false);
               resetForm();
             }
