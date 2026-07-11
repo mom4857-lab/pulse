@@ -630,12 +630,14 @@ export default function NewsJournal() {
         .nj-empty-list { text-align: center; padding: 30px 10px; color: var(--text-soft); font-size: 13.5px; }
 
         .nj-modal-overlay {
-          position: fixed; inset: 0; background: rgba(4,6,10,0.65); backdrop-filter: blur(3px); display: flex;
-          align-items: center; justify-content: center; z-index: 50; padding: 16px;
+          position: fixed; inset: 0; background: rgba(4,6,10,0.65); backdrop-filter: blur(3px);
+          z-index: 50; overflow: auto; text-align: center; padding: 48px 16px;
         }
+        .nj-modal-overlay::before { content: ""; display: inline-block; height: 1px; width: 0; }
         .nj-modal {
+          display: inline-block; text-align: left; vertical-align: top;
           background: var(--surface); border: 1px solid var(--line); border-radius: 16px; width: 520px; max-width: 92vw;
-          height: auto; max-height: 88vh; min-width: 340px; min-height: 320px; overflow: auto;
+          height: auto; max-height: 80vh; min-width: 340px; min-height: 320px; overflow: auto;
           padding: 22px 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
           animation: nj-pop-in .18s ease; resize: both;
         }
