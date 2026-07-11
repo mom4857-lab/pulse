@@ -168,8 +168,6 @@ export default function NewsJournal() {
   const [fUrl, setFUrl] = useState("");
   const [fTitle, setFTitle] = useState("");
   const [fDate, setFDate] = useState(todayStr());
-  const [fDateFetching, setFDateFetching] = useState(false);
-  const lastFetchedUrlRef = useRef("");
   const [fIndustryInput, setFIndustryInput] = useState("");
   const [fStockInput, setFStockInput] = useState("");
   const [fIndustryTags, setFIndustryTags] = useState([]);
@@ -268,7 +266,7 @@ export default function NewsJournal() {
         throw new Error(reason);
       }
       patchEntry(entry.id, {
-        aiIndustryKeywords: Array.isArray(data.industryKeywords) ? data.industryKeywords : [],
+        aiIndustryKeywords: [],
         aiStockKeywords: Array.isArray(data.stockKeywords) ? data.stockKeywords : [],
       });
     } catch (e) {
@@ -307,7 +305,6 @@ export default function NewsJournal() {
     setFStockTags([]);
     setFSummaryLines([{ id: makeLineId(), text: "" }]);
     lineInputRefs.current = {};
-    lastFetchedUrlRef.current = "";
   }
 
   function openEdit(entry) {
@@ -321,7 +318,6 @@ export default function NewsJournal() {
     setFStockTags(entry.stockTags || []);
     setFSummaryLines(linesFromSummaryText(entry.summary || ""));
     lineInputRefs.current = {};
-    lastFetchedUrlRef.current = entry.url || "";
     setShowForm(true);
   }
 
@@ -388,31 +384,6 @@ export default function NewsJournal() {
         const targetId = fSummaryLines[idx + 1].id;
         requestAnimationFrame(() => lineInputRefs.current[targetId]?.focus());
       }
-    }
-  }
-
-  async function handleUrlBlurFetchDate() {
-    const url = fUrl.trim();
-    if (!url || !/^https?:\/\//i.test(url)) return;
-    if (lastFetchedUrlRef.current === url) return;
-    lastFetchedUrlRef.current = url;
-    setFDateFetching(true);
-    try {
-      const res = await fetch("/api/fetch-date", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data && data.date) {
-        setFDate(data.date);
-        showToast(`날짜를 ${data.date}로 가져왔어요.`);
-      }
-      // Silently ignore not-found/failure — the user can just set the date manually.
-    } catch (e) {
-      // network error — ignore, same as above.
-    } finally {
-      setFDateFetching(false);
     }
   }
 
@@ -1398,22 +1369,9 @@ export default function NewsJournal() {
                 </div>
                 {entryKwLoading[e.id] ? (
                   <div className="nj-period-analysis-body muted">뉴스 링크를 읽는 중...</div>
-                ) : (e.aiIndustryKeywords && e.aiIndustryKeywords.length > 0) ||
-                  (e.aiStockKeywords && e.aiStockKeywords.length > 0) ? (
+                ) : e.aiStockKeywords && e.aiStockKeywords.length > 0 ? (
                   <div className="nj-ai-kw-row">
-                    {(e.aiIndustryKeywords || []).map((kw) => (
-                      <span className="nj-ai-kw-chip industry" key={"eaki" + kw}>
-                        #{kw}
-                        <button
-                          className="nj-kw-add-btn"
-                          title="산업군 키워드로 추가"
-                          onClick={() => addSuggestedKeyword(e.id, kw, "industry")}
-                        >
-                          !
-                        </button>
-                      </span>
-                    ))}
-                    {(e.aiStockKeywords || []).map((kw) => (
+                    {e.aiStockKeywords.map((kw) => (
                       <span className="nj-ai-kw-chip stock" key={"eaks" + kw}>
                         #{kw}
                         <button
@@ -1486,9 +1444,7 @@ export default function NewsJournal() {
                 placeholder="https://..."
                 value={fUrl}
                 onChange={(ev) => setFUrl(ev.target.value)}
-                onBlur={handleUrlBlurFetchDate}
               />
-              {fDateFetching && <div className="nj-mini-label" style={{ marginTop: 4 }}>날짜를 가져오는 중...</div>}
               <div className="nj-field-gap">
                 <div className="nj-mini-label">제목</div>
                 <input

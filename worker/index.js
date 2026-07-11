@@ -1,7 +1,7 @@
 // Cloudflare Worker entry point.
-// Routes POST /api/analyze-period, /api/entry-keywords, and /api/fetch-date
-// to the handlers (server-side, keeps the API key secret where needed) and
-// everything else to the static site (dist/).
+// Routes POST /api/analyze-period and /api/entry-keywords to the AI handlers
+// (server-side, keeps the API key secret) and everything else to the
+// static site (dist/).
 
 export default {
   async fetch(request, env, ctx) {
@@ -12,9 +12,6 @@ export default {
     }
     if (url.pathname === "/api/entry-keywords" && request.method === "POST") {
       return handleEntryKeywords(request, env);
-    }
-    if (url.pathname === "/api/fetch-date" && request.method === "POST") {
-      return handleFetchDate(request, env);
     }
 
     return env.ASSETS.fetch(request);
@@ -75,8 +72,10 @@ async function handleAnalyzePeriod(request, env) {
     "각 키워드는 반드시 하나의 단일 용어여야 한다. 괄호, 슬래시(/), 쉼표, '·' 등으로 여러 개념을 한 키워드에 묶지 마라. " +
     "정말 연관성이 가장 높은 것 하나만 골라 짧은 단일 용어로 써라.";
   const koreanOnlyRule =
-    "모든 키워드는 반드시 한글로 표기해라. 영문 회사명이나 기술명도 한글 표기로 바꿔서 써라 " +
-    "(예: NVIDIA → 엔비디아, Anthropic → 앤스로픽). 이미 통용되는 한글 표기가 있으면 그것을 그대로 사용해라.";
+    "회사명은 반드시 한글로 표기해라. 영문 회사명도 한글 표기로 바꿔서 써라 (예: NVIDIA → 엔비디아, Anthropic → 앤스로픽). " +
+    "이미 통용되는 한글 표기가 있는 회사명은 그것을 그대로 사용해라. " +
+    "다만 기술·제품·부품명에 업계에서 널리 쓰이는 약어가 있으면 풀어쓰지 말고 그 약어를 그대로 사용해라 " +
+    "(예: 고대역폭메모리 → HBM, 소형모듈원자로 → SMR, 극자외선 노광장비 → EUV).";
 
   const prompt =
     `다음은 한 개인 투자자가 ${periodLabelText} 기간 동안 직접 읽고 정리한 뉴스 기록 목록과, 그 기록에 첨부된 뉴스 링크의 실제 본문이다.\n\n` +
@@ -85,7 +84,8 @@ async function handleAnalyzePeriod(request, env) {
     "2) connections: 기록들 사이의 연결고리나 반복되는 주제 (한국어 2~3문장)\n" +
     "3) signals: 특별히 주목할 만한 변화나 신호 (한국어 2~3문장)\n" +
     "4) keywords: 이 기간 전체를 관통하는, 실제로 연관성이 높은 키워드 정확히 10개. " +
-    "산업군, 기업, 핵심 부품·소재, 기술, 제품 등 무엇이든 될 수 있다. 뉴스 본문과 기록을 바탕으로 밸류체인과 시장 상황을 두루 판단해서 골라라. " +
+    "기업명, 핵심 부품·소재, 기술, 제품 등 무엇이든 될 수 있다 (산업군/섹터 같은 큰 범주 키워드는 추천하지 마라). " +
+    "뉴스 본문과 기록을 바탕으로 밸류체인과 시장 상황을 두루 판단해서 골라라. " +
     "직접 언급되지 않았더라도 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 실질적으로 연관된 항목이면 포함해라. " +
     "기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해라. " +
     singleTermRule +
@@ -188,22 +188,22 @@ async function handleEntryKeywords(request, env) {
     "각 키워드는 반드시 하나의 단일 용어여야 한다. 괄호, 슬래시(/), 쉼표, '·' 등으로 여러 개념을 한 키워드에 묶지 마라. " +
     "정말 연관성이 가장 높은 것 하나만 골라 짧은 단일 용어로 써라.";
   const koreanOnlyRule =
-    "모든 키워드는 반드시 한글로 표기해라. 영문 회사명이나 기술명도 한글 표기로 바꿔서 써라 " +
-    "(예: NVIDIA → 엔비디아, Anthropic → 앤스로픽). 이미 통용되는 한글 표기가 있으면 그것을 그대로 사용해라.";
+    "회사명은 반드시 한글로 표기해라. 영문 회사명도 한글 표기로 바꿔서 써라 (예: NVIDIA → 엔비디아, Anthropic → 앤스로픽). " +
+    "이미 통용되는 한글 표기가 있는 회사명은 그것을 그대로 사용해라. " +
+    "다만 기술·제품·부품명에 업계에서 널리 쓰이는 약어가 있으면 풀어쓰지 말고 그 약어를 그대로 사용해라 " +
+    "(예: 고대역폭메모리 → HBM, 소형모듈원자로 → SMR, 극자외선 노광장비 → EUV).";
 
   const instruction =
     sourceType === "article"
-      ? "다음은 한 뉴스 기사 본문에서 추출한 텍스트다. 이 기사의 밸류체인과 시장 상황을 두루 분석해서, 실제로 연관성이 높은 키워드를 총 10개 추천해줘: " +
-        "(1) 산업군/섹터 키워드 최대 4개. " +
-        "(2) 관련 키워드 최대 6개 — 기업명, 핵심 부품·소재명, 기술명, 제품명 중 무엇이든 될 수 있다. " +
+      ? "다음은 한 뉴스 기사 본문에서 추출한 텍스트다. 이 기사의 밸류체인과 시장 상황을 두루 분석해서, 실제로 연관성이 높은 키워드를 총 10개 추천해줘. " +
+        "기업명, 핵심 부품·소재명, 기술명, 제품명 중 무엇이든 될 수 있다 (산업군/섹터 같은 큰 범주 키워드는 추천하지 마라). " +
         "기사에 직접 언급되지 않았더라도, 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 수요나 실적에 실질적으로 영향을 받을 만한 항목이면 포함해라. " +
         "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명·부품명에는 이 제한이 없다. " +
         singleTermRule +
         " " +
         koreanOnlyRule
-      : "다음은 한 개인 투자자가 직접 읽고 정리한 뉴스 기록의 요점들이다. 이 내용의 밸류체인과 시장 상황을 두루 분석해서, 실제로 연관성이 높은 키워드를 총 10개 추천해줘: " +
-        "(1) 산업군/섹터 키워드 최대 4개. " +
-        "(2) 관련 키워드 최대 6개 — 기업명, 핵심 부품·소재명, 기술명, 제품명 중 무엇이든 될 수 있다. " +
+      : "다음은 한 개인 투자자가 직접 읽고 정리한 뉴스 기록의 요점들이다. 이 내용의 밸류체인과 시장 상황을 두루 분석해서, 실제로 연관성이 높은 키워드를 총 10개 추천해줘. " +
+        "기업명, 핵심 부품·소재명, 기술명, 제품명 중 무엇이든 될 수 있다 (산업군/섹터 같은 큰 범주 키워드는 추천하지 마라). " +
         "직접 언급되지 않았더라도, 같은 밸류체인(공급망, 고객사, 경쟁사, 후공정/소부장 등)에 속해 수요나 실적에 실질적으로 영향을 받을 만한 항목이면 포함해라. " +
         "단, 기업명을 추천할 때는 반드시 국내외 증권거래소에 상장되어 있는 기업만 추천하고 비상장 기업은 제외해. 기술명·제품명·부품명에는 이 제한이 없다. " +
         singleTermRule +
@@ -212,8 +212,7 @@ async function handleEntryKeywords(request, env) {
 
   const jsonInstruction =
     '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해.\n' +
-    '{"industryKeywords": ["단일 용어 산업군/섹터 키워드 (최대 4개, 괄호/슬래시 금지)"], ' +
-    '"stockKeywords": ["단일 용어 기업(상장사)/핵심부품/기술/제품 키워드 (최대 6개, 괄호/슬래시 금지)"]}';
+    '{"stockKeywords": ["단일 용어 기업(상장사)/핵심부품/기술/제품 키워드 (최대 10개, 괄호/슬래시 금지)"]}';
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -256,110 +255,16 @@ async function handleEntryKeywords(request, env) {
       cleaned = cleaned.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
       parsed = JSON.parse(cleaned);
     } catch (parseErr) {
-      parsed = { industryKeywords: [], stockKeywords: [] };
+      parsed = { stockKeywords: [] };
     }
 
     return json({
-      industryKeywords: normalizeKeywords(parsed.industryKeywords, 4),
-      stockKeywords: normalizeKeywords(parsed.stockKeywords, 6),
+      stockKeywords: normalizeKeywords(parsed.stockKeywords, 10),
       source: sourceType,
     });
   } catch (e) {
     return json({ error: "server_error", detail: String(e) }, 500);
   }
-}
-
-async function handleFetchDate(request, env) {
-  let body;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return json({ error: "invalid_json" }, 400);
-  }
-
-  const articleUrl = (body.url || "").toString().trim();
-  if (!articleUrl) {
-    return json({ error: "empty_url" }, 400);
-  }
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(articleUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) {
-      return json({ error: "fetch_failed", detail: `status ${res.status}` }, 502);
-    }
-
-    const html = await res.text();
-    const date = extractPublishedDate(html);
-
-    if (!date) {
-      return json({ error: "date_not_found" }, 404);
-    }
-
-    return json({ date });
-  } catch (e) {
-    return json({ error: "server_error", detail: String(e) }, 500);
-  }
-}
-
-// Looks for a publish date in the usual places news sites put it: common
-// meta tags, <time datetime>, and JSON-LD's datePublished field. Returns
-// the first candidate that parses to a valid date, formatted as YYYY-MM-DD.
-function extractPublishedDate(html) {
-  const candidates = [];
-  const relevantKeys = new Set([
-    "article:published_time",
-    "og:published_time",
-    "article:modified_time",
-    "pubdate",
-    "date",
-    "dc.date.issued",
-    "dc.date",
-    "sailthru.date",
-    "publishdate",
-    "parsely-pub-date",
-  ]);
-
-  const metaRegex = /<meta\s+[^>]*?(?:property|name)=["']([^"']+)["'][^>]*?content=["']([^"']+)["'][^>]*?>/gi;
-  let m;
-  while ((m = metaRegex.exec(html))) {
-    if (relevantKeys.has(m[1].toLowerCase())) candidates.push(m[2]);
-  }
-
-  const metaRegex2 = /<meta\s+[^>]*?content=["']([^"']+)["'][^>]*?(?:property|name)=["']([^"']+)["'][^>]*?>/gi;
-  while ((m = metaRegex2.exec(html))) {
-    if (relevantKeys.has(m[2].toLowerCase())) candidates.push(m[1]);
-  }
-
-  const timeRegex = /<time\s+[^>]*?datetime=["']([^"']+)["'][^>]*?>/gi;
-  while ((m = timeRegex.exec(html))) {
-    candidates.push(m[1]);
-  }
-
-  const ldRegex = /"datePublished"\s*:\s*"([^"]+)"/gi;
-  while ((m = ldRegex.exec(html))) {
-    candidates.push(m[1]);
-  }
-
-  for (const c of candidates) {
-    const d = new Date(c);
-    if (!isNaN(d.getTime())) {
-      const y = d.getFullYear();
-      const mo = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      return `${y}-${mo}-${day}`;
-    }
-  }
-  return null;
 }
 
 async function fetchArticleText(url) {
