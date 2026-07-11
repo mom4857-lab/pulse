@@ -292,6 +292,7 @@ export default function NewsJournal() {
           coreFlow: data.coreFlow || "",
           connections: data.connections || "",
           signals: data.signals || "",
+          keywords: Array.isArray(data.keywords) ? data.keywords : [],
           generatedAt: Date.now(),
           entryCount: periodEntries.length,
         },
@@ -377,6 +378,9 @@ export default function NewsJournal() {
       if (analysis.coreFlow) text += `▪ 핵심 흐름: ${analysis.coreFlow}\n`;
       if (analysis.connections) text += `▪ 연결고리 및 반복 주제: ${analysis.connections}\n`;
       if (analysis.signals) text += `▪ 주목할 신호: ${analysis.signals}\n`;
+      if (analysis.keywords && analysis.keywords.length) {
+        text += `▪ 관련 키워드: ${analysis.keywords.map((k) => "#" + k).join(" ")}\n`;
+      }
       text += "\n";
     }
     periodEntries
@@ -600,6 +604,11 @@ export default function NewsJournal() {
         .nj-analysis-section { padding: 9px 0; border-bottom: 1px dashed var(--line); }
         .nj-analysis-section:last-of-type { border-bottom: none; padding-bottom: 4px; }
         .nj-analysis-section-title { font-size: 11px; font-weight: 700; color: var(--violet); letter-spacing: 0.03em; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+        .nj-period-kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+        .nj-period-kw-chip {
+          font-size: 12px; padding: 3px 10px; border-radius: 999px; font-family: 'JetBrains Mono', monospace;
+          color: var(--violet); background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.35);
+        }
         .nj-oneline-btn { border: none; background: none; color: var(--violet); font-size: 12.5px; cursor: pointer; padding: 0; margin-left: 8px; font-family: 'Inter', sans-serif; }
         .nj-oneline-btn:hover { text-decoration: underline; }
         .nj-period-analysis-meta { font-size: 11px; color: var(--text-soft); margin-top: 8px; font-family: 'JetBrains Mono', monospace; }
@@ -625,9 +634,10 @@ export default function NewsJournal() {
           align-items: center; justify-content: center; z-index: 50; padding: 16px;
         }
         .nj-modal {
-          background: var(--surface); border: 1px solid var(--line); border-radius: 16px; width: 100%; max-width: 520px;
-          max-height: 88vh; overflow-y: auto; padding: 22px 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-          animation: nj-pop-in .18s ease;
+          background: var(--surface); border: 1px solid var(--line); border-radius: 16px; width: 520px; max-width: 92vw;
+          height: auto; max-height: 88vh; min-width: 340px; min-height: 320px; overflow: auto;
+          padding: 22px 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+          animation: nj-pop-in .18s ease; resize: both;
         }
         .nj-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
         .nj-modal-head h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; margin: 0; font-weight: 700; }
@@ -943,6 +953,18 @@ export default function NewsJournal() {
                     <div className="nj-analysis-section">
                       <div className="nj-analysis-section-title">주목할 신호</div>
                       <div className="nj-period-analysis-body">{current.signals}</div>
+                    </div>
+                  )}
+                  {current.keywords && current.keywords.length > 0 && (
+                    <div className="nj-analysis-section">
+                      <div className="nj-analysis-section-title">관련 키워드 추천 (기사 본문 기반)</div>
+                      <div className="nj-period-kw-row">
+                        {current.keywords.map((kw) => (
+                          <span className="nj-period-kw-chip" key={kw}>
+                            #{kw}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                   <div className="nj-period-analysis-meta">
