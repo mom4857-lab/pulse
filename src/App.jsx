@@ -1105,7 +1105,7 @@ export default function NewsJournal() {
         .nj-entry-title:hover { text-decoration: underline; }
         .nj-entry-summary { margin: 8px 0; }
         .nj-summary-line { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.6; color: var(--text); padding: 2px 0; }
-        .nj-summary-line span:last-child { text-wrap: pretty; }
+        .nj-summary-line span:last-child { text-wrap: pretty; word-break: keep-all; overflow-wrap: break-word; }
         .nj-summary-marker { flex: none; width: 7px; height: 7px; margin-top: 6.5px; border-radius: 2px; background: linear-gradient(135deg, var(--teal), var(--violet)); }
         .nj-period-analysis {
           background: radial-gradient(120% 140% at 50% 0%, rgba(167,139,250,0.08), transparent 60%), var(--surface);
@@ -1215,7 +1215,7 @@ export default function NewsJournal() {
         .nj-bullet-input {
           flex: 1; outline: none; color: var(--text); min-height: 1.4em;
           font-family: 'Inter', sans-serif; font-size: 13.5px; padding: 2px 0;
-          white-space: pre-wrap; word-break: break-word;
+          white-space: pre-wrap; word-break: keep-all; overflow-wrap: break-word;
         }
         .nj-bullet-input:empty:before { content: attr(data-placeholder); color: var(--text-soft); pointer-events: none; }
         .nj-bullet-input b, .nj-table-cell-input b { font-weight: 700; }
@@ -1257,7 +1257,7 @@ export default function NewsJournal() {
         }
         .nj-table-cell-input {
           width: 100%; min-height: 1.3em; outline: none; color: var(--text); font-size: 12.5px; padding: 4px;
-          font-family: 'Inter', sans-serif; box-sizing: border-box; white-space: pre-wrap; word-break: break-word;
+          font-family: 'Inter', sans-serif; box-sizing: border-box; white-space: pre-wrap; word-break: keep-all; overflow-wrap: break-word;
         }
         .nj-edit-table th, .nj-edit-table td.nj-table-row-remove, .nj-edit-table th.nj-table-add-col {
           position: relative;
