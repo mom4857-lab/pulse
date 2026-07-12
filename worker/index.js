@@ -65,14 +65,19 @@ async function handleAnalyzePeriod(request, env) {
     "다만 기술·제품·부품명에 업계에서 널리 쓰이는 약어가 있으면 풀어쓰지 말고 그 약어를 그대로 사용해라 " +
     "(예: 고대역폭메모리 → HBM, 소형모듈원자로 → SMR, 극자외선 노광장비 → EUV).";
 
+  const sentenceLengthRule =
+    "각 문장은 반드시 짧게 써라 — 하나의 문장이 25~35자를 넘지 않도록 끊어써라. " +
+    "한 문장에 여러 내용을 욱여넣지 말고, 내용이 더 필요하면 문장을 하나 더 추가해라. 절대 긴 만연체로 쓰지 마라.";
+
   const isDetailed = periodType === "month" || periodType === "year";
   const detailInstruction = isDetailed
     ? "이번 분석 대상 기간은 " +
       (periodType === "year" ? "1년" : "1개월") +
-      " 단위로 비교적 길기 때문에, coreFlow·connections·signals 각 항목을 4~6문장으로 좀 더 상세하게 작성해줘. " +
+      " 단위로 비교적 길기 때문에, coreFlow·connections·signals 각 항목을 6~10개의 짧은 문장으로 좀 더 상세하게 작성해줘. " +
       "단, 각 항목은 반드시 500자를 넘지 않게 써라 — 500자를 넘길 것 같으면 덜 중요한 내용을 줄여서라도 500자 이내로 맞춰라. " +
-      "필요하면 기간 내 시간 흐름(초반/중반/후반)이나 하위 주제별로 나눠서 설명해도 좋다."
-    : "coreFlow·connections·signals 각 항목은 2~3문장, 200자 이내로 간결하게 작성해줘.";
+      "필요하면 기간 내 시간 흐름(초반/중반/후반)이나 하위 주제별로 나눠서 설명해도 좋다. " +
+      sentenceLengthRule
+    : "coreFlow·connections·signals 각 항목은 2~3개의 짧은 문장, 200자 이내로 간결하게 작성해줘. " + sentenceLengthRule;
 
   const prompt =
     `다음은 한 개인 투자자가 ${periodLabelText} 기간 동안 직접 읽고 정리한 뉴스 기록 목록이다.\n\n` +

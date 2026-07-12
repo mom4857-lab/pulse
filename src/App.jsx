@@ -1105,6 +1105,7 @@ export default function NewsJournal() {
         .nj-entry-title:hover { text-decoration: underline; }
         .nj-entry-summary { margin: 8px 0; }
         .nj-summary-line { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.6; color: var(--text); padding: 2px 0; }
+        .nj-summary-line span:last-child { text-wrap: pretty; }
         .nj-summary-marker { flex: none; width: 7px; height: 7px; margin-top: 6.5px; border-radius: 2px; background: linear-gradient(135deg, var(--teal), var(--violet)); }
         .nj-period-analysis {
           background: radial-gradient(120% 140% at 50% 0%, rgba(167,139,250,0.08), transparent 60%), var(--surface);
