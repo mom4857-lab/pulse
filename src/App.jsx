@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2 } from "lucide-react";
+import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2, Bold, Underline, Palette, Square } from "lucide-react";
 import { storage } from "./storage.js";
 
 const STORAGE_KEY = "news-journal-entries";
@@ -149,8 +149,50 @@ function makeLineId() {
 }
 function linesFromSummaryText(summary) {
   const parsed = parseSummaryLinesRich(summary);
-  if (parsed.length === 0) return [{ id: makeLineId(), text: "", noMarker: false }];
-  return parsed.map(({ text, noMarker }) => ({ id: makeLineId(), text, noMarker }));
+  if (parsed.length === 0) return [{ id: makeLineId(), text: "", noMarker: false, bold: false, underline: false, color: null }];
+  return parsed.map(({ text, noMarker }) => ({ id: makeLineId(), text, noMarker, bold: false, underline: false, color: null }));
+}
+// Loads bullet lines for editing, preferring the richer saved format
+// (entry.summaryLines) when present, falling back to plain-text parsing
+// for older entries saved before formatting existed.
+function linesFromEntry(entry) {
+  if (Array.isArray(entry.summaryLines) && entry.summaryLines.length > 0) {
+    return entry.summaryLines.map((l) => ({
+      id: makeLineId(),
+      text: l.text || "",
+      noMarker: !!l.noMarker,
+      bold: !!l.bold,
+      underline: !!l.underline,
+      color: l.color || null,
+    }));
+  }
+  return linesFromSummaryText(entry.summary || "");
+}
+// Same idea for read-only display: use the rich saved lines when present.
+function getSummaryLines(entry) {
+  if (Array.isArray(entry.summaryLines) && entry.summaryLines.length > 0) {
+    return entry.summaryLines.map((l) => ({
+      text: l.text || "",
+      noMarker: !!l.noMarker,
+      bold: !!l.bold,
+      underline: !!l.underline,
+      color: l.color || null,
+    }));
+  }
+  return parseSummaryLinesRich(entry.summary).map((l) => ({ ...l, bold: false, underline: false, color: null }));
+}
+const TEXT_COLOR_PRESETS = ["#fb7185", "#f2b84b", "#34d399", "#60a5fa", "#a78bfa", "#e5e9f0"];
+function blankTableCell() {
+  return { text: "", bold: false, underline: false, color: null, borderColor: null };
+}
+// Old saved tables stored plain strings per cell; normalize to the richer
+// cell-object format so both old and new entries render/edit the same way.
+function normalizeTable(table) {
+  if (!table) return null;
+  return {
+    headers: table.headers || [],
+    rows: (table.rows || []).map((row) => row.map((cell) => (typeof cell === "string" ? { ...blankTableCell(), text: cell } : cell))),
+  };
 }
 
 export default function NewsJournal() {
@@ -172,6 +214,7 @@ export default function NewsJournal() {
   const [cloudView, setCloudView] = useState("list");
   const [showTypeChoice, setShowTypeChoice] = useState(false);
   const [formType, setFormType] = useState("news");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [fTable, setFTable] = useState(null);
   const listRef = useRef(null);
   const overlayMouseDownOnBackdrop = useRef(false);
@@ -187,6 +230,8 @@ export default function NewsJournal() {
   const [fStockTags, setFStockTags] = useState([]);
   const [fTechTags, setFTechTags] = useState([]);
   const [fSummaryLines, setFSummaryLines] = useState(() => [{ id: makeLineId(), text: "" }]);
+  const [focusedLineId, setFocusedLineId] = useState(null);
+  const [focusedCell, setFocusedCell] = useState(null);
   const lineInputRefs = useRef({});
 
   useEffect(() => {
@@ -319,7 +364,10 @@ export default function NewsJournal() {
     setFIndustryTags([]);
     setFStockTags([]);
     setFTechTags([]);
-    setFSummaryLines([{ id: makeLineId(), text: "" }]);
+    const firstLine = { id: makeLineId(), text: "", noMarker: false, bold: false, underline: false, color: null };
+    setFSummaryLines([firstLine]);
+    setFocusedLineId(firstLine.id);
+    setFocusedCell(null);
     setFTable(null);
     lineInputRefs.current = {};
   }
@@ -336,14 +384,27 @@ export default function NewsJournal() {
     setFIndustryTags(entry.industryTags || []);
     setFStockTags(entry.stockTags || []);
     setFTechTags(entry.techTags || []);
-    setFSummaryLines(linesFromSummaryText(entry.summary || ""));
-    setFTable(entry.table || null);
+    const lines = linesFromEntry(entry);
+    setFSummaryLines(lines);
+    setFocusedLineId(lines[0]?.id || null);
+    setFocusedCell(null);
+    setFTable(normalizeTable(entry.table));
     lineInputRefs.current = {};
     setShowForm(true);
   }
 
   function updateLineText(id, text) {
     setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, text } : l)));
+  }
+
+  function toggleLineStyle(id, key) {
+    if (!id) return;
+    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, [key]: !l[key] } : l)));
+  }
+
+  function setLineColor(id, color) {
+    if (!id) return;
+    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, color } : l)));
   }
 
   function handleLineKeyDown(id, e) {
@@ -366,8 +427,9 @@ export default function NewsJournal() {
       const newId = makeLineId();
       const newLines = fSummaryLines.slice();
       newLines[idx] = { ...newLines[idx], text: before };
-      newLines.splice(idx + 1, 0, { id: newId, text: after });
+      newLines.splice(idx + 1, 0, { id: newId, text: after, noMarker: false, bold: false, underline: false, color: null });
       setFSummaryLines(newLines);
+      setFocusedLineId(newId);
       requestAnimationFrame(() => {
         const el = lineInputRefs.current[newId];
         if (el) {
@@ -438,28 +500,48 @@ export default function NewsJournal() {
   }
 
   function addTable() {
-    setFTable({ headers: ["항목", "내용"], rows: [["", ""]] });
+    setFTable({ headers: ["항목", "내용"], rows: [[blankTableCell(), blankTableCell()]] });
   }
   function removeTable() {
     setFTable(null);
+    setFocusedCell(null);
   }
   function updateTableHeader(colIdx, value) {
     setFTable((t) => ({ ...t, headers: t.headers.map((h, i) => (i === colIdx ? value : h)) }));
   }
-  function updateTableCell(rowIdx, colIdx, value) {
+  function updateTableCellText(rowIdx, colIdx, value) {
     setFTable((t) => ({
       ...t,
-      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? value : c)) : row)),
+      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, text: value } : c)) : row)),
+    }));
+  }
+  function toggleTableCellStyle(rowIdx, colIdx, key) {
+    setFTable((t) => ({
+      ...t,
+      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, [key]: !c[key] } : c)) : row)),
+    }));
+  }
+  function setTableCellColor(rowIdx, colIdx, color) {
+    setFTable((t) => ({
+      ...t,
+      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, color } : c)) : row)),
+    }));
+  }
+  function setTableCellBorderColor(rowIdx, colIdx, borderColor) {
+    setFTable((t) => ({
+      ...t,
+      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, borderColor } : c)) : row)),
     }));
   }
   function addTableRow() {
-    setFTable((t) => ({ ...t, rows: [...t.rows, t.headers.map(() => "")] }));
+    setFTable((t) => ({ ...t, rows: [...t.rows, t.headers.map(() => blankTableCell())] }));
   }
   function removeTableRow(rowIdx) {
     setFTable((t) => ({ ...t, rows: t.rows.filter((_, i) => i !== rowIdx) }));
+    if (focusedCell && focusedCell.rowIdx === rowIdx) setFocusedCell(null);
   }
   function addTableColumn() {
-    setFTable((t) => ({ ...t, headers: [...t.headers, "항목"], rows: t.rows.map((r) => [...r, ""]) }));
+    setFTable((t) => ({ ...t, headers: [...t.headers, "항목"], rows: t.rows.map((r) => [...r, blankTableCell()]) }));
   }
   function removeTableColumn(colIdx) {
     setFTable((t) => ({
@@ -467,6 +549,7 @@ export default function NewsJournal() {
       headers: t.headers.filter((_, i) => i !== colIdx),
       rows: t.rows.map((r) => r.filter((_, i) => i !== colIdx)),
     }));
+    if (focusedCell && focusedCell.colIdx === colIdx) setFocusedCell(null);
   }
 
   const [editingSection, setEditingSection] = useState(null);
@@ -561,10 +644,16 @@ export default function NewsJournal() {
   }
 
   function handleSave() {
-    const fSummary = fSummaryLines
+    const savedLines = fSummaryLines
       .filter((l) => l.text.trim())
-      .map((l) => (l.noMarker ? NO_MARKER_PREFIX : "") + l.text.trim())
-      .join("\n");
+      .map((l) => ({
+        text: l.text.trim(),
+        noMarker: !!l.noMarker,
+        bold: !!l.bold,
+        underline: !!l.underline,
+        color: l.color || null,
+      }));
+    const fSummary = savedLines.map((l) => (l.noMarker ? NO_MARKER_PREFIX : "") + l.text).join("\n");
     if (!fTitle.trim() && !fUrl.trim()) {
       showToast("제목이나 뉴스 링크 중 하나는 입력해주세요.");
       return;
@@ -587,6 +676,7 @@ export default function NewsJournal() {
         stockTags: fStockTags,
         techTags: fTechTags,
         summary: fSummary.trim(),
+        summaryLines: savedLines,
         table: fTable,
       };
       const updated = entries.map((e) => (e.id === editingId ? updatedEntry : e));
@@ -607,6 +697,7 @@ export default function NewsJournal() {
       stockTags: fStockTags,
       techTags: fTechTags,
       summary: fSummary.trim(),
+      summaryLines: savedLines,
       table: fTable,
       createdAt: Date.now(),
     };
@@ -628,11 +719,13 @@ export default function NewsJournal() {
   const allTechTagsUsed = Array.from(new Set(entries.flatMap((e) => e.techTags || [])));
 
   const periodEntries = entries.filter((e) => isInPeriod(e.date, periodType, refDate));
-  const displayedEntries = (selectedTag
-    ? periodEntries.filter((e) => tagsForCategory(e, category).includes(selectedTag))
-    : periodEntries
-  )
-    .slice()
+  const displayedEntries = periodEntries
+    .filter((e) => (selectedTag ? tagsForCategory(e, category).includes(selectedTag) : true))
+    .filter((e) => {
+      if (typeFilter === "all") return true;
+      if (typeFilter === "youtube") return e.type === "youtube";
+      return e.type !== "youtube";
+    })
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
 
   const tagCounts = getTagCounts(periodEntries, category);
@@ -865,8 +958,10 @@ export default function NewsJournal() {
         }
         .nj-export-row button:hover { border-color: var(--teal); }
 
-        .nj-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .nj-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
         .nj-list-header h2 { font-size: 15px; margin: 0; font-family: 'Space Grotesk', sans-serif; font-weight: 600; }
+        .nj-list-header-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .nj-type-filter button { font-size: 12px; padding: 5px 11px; }
         .nj-clear-tag { font-size: 12px; color: var(--rose); background: none; border: none; cursor: pointer; text-decoration: underline; }
 
         .nj-entry {
@@ -874,8 +969,11 @@ export default function NewsJournal() {
           padding: 14px 16px; margin-bottom: 10px; transition: border-color .15s ease;
         }
         .nj-entry:hover { border-color: rgba(45,212,191,0.35); }
-        .nj-entry.youtube { border-left: 3px solid var(--youtube); }
-        .nj-entry.youtube:hover { border-color: var(--line); border-left-color: var(--youtube); }
+        .nj-entry.youtube {
+          background: radial-gradient(140% 100% at 0% 0%, rgba(255,59,59,0.08), transparent 60%), var(--surface);
+          border-color: rgba(255,59,59,0.28); border-left: 3px solid var(--youtube);
+        }
+        .nj-entry.youtube:hover { border-color: rgba(255,59,59,0.5); }
         .nj-entry-badge {
           display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700;
           padding: 2px 7px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; width: fit-content;
@@ -1000,6 +1098,29 @@ export default function NewsJournal() {
         .nj-bullet-input::placeholder { color: var(--text-soft); }
 
         .nj-add-table-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; }
+
+        .nj-format-toolbar {
+          display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+          background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px;
+          padding: 6px 8px; margin-bottom: 6px;
+        }
+        .nj-format-toolbar button {
+          border: 1px solid transparent; background: none; color: var(--text-soft); cursor: pointer;
+          display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;
+          border-radius: 5px; padding: 0; transition: background .15s ease, color .15s ease;
+        }
+        .nj-format-toolbar button:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+        .nj-format-toolbar button.active { background: rgba(45,212,191,0.16); color: var(--teal); }
+        .nj-format-toolbar button:disabled { opacity: 0.35; cursor: default; }
+        .nj-toolbar-divider { width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+        .nj-toolbar-label { display: flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-soft); margin-right: 2px; }
+        .nj-color-swatch {
+          width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line); cursor: pointer;
+          padding: 0; display: flex; align-items: center; justify-content: center; color: var(--bg);
+        }
+        .nj-color-swatch.active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+        .nj-color-swatch.reset { background: var(--surface); color: var(--text-soft); border-style: dashed; }
+        .nj-color-swatch.reset:hover { color: var(--rose); border-color: var(--rose); }
         .nj-table-editor { margin-top: 10px; }
         .nj-edit-table { width: 100%; border-collapse: collapse; }
         .nj-edit-table th, .nj-edit-table td {
@@ -1442,7 +1563,20 @@ export default function NewsJournal() {
         )}
 
         <div ref={listRef} className="nj-list-header">
-          <h2>이 기간의 기록 ({displayedEntries.length}건)</h2>
+          <div className="nj-list-header-left">
+            <h2>이 기간의 기록 ({displayedEntries.length}건)</h2>
+            <div className="nj-seg nj-type-filter">
+              {[
+                ["all", "전체"],
+                ["news", "뉴스"],
+                ["youtube", "유튜브"],
+              ].map(([val, label]) => (
+                <button key={val} className={typeFilter === val ? "active" : ""} onClick={() => setTypeFilter(val)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {selectedTag && (
             <button className="nj-clear-tag" onClick={() => setSelectedTag(null)}>
               #{selectedTag} 선택 해제
@@ -1513,33 +1647,56 @@ export default function NewsJournal() {
                 ))}
               </div>
               <div className="nj-entry-summary">
-                {parseSummaryLinesRich(e.summary).map((line, i) => (
+                {getSummaryLines(e).map((line, i) => (
                   <div className="nj-summary-line" key={i}>
                     <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
-                    <span>{line.text}</span>
+                    <span
+                      style={{
+                        fontWeight: line.bold ? 700 : 400,
+                        textDecoration: line.underline ? "underline" : "none",
+                        color: line.color || "inherit",
+                      }}
+                    >
+                      {line.text}
+                    </span>
                   </div>
                 ))}
               </div>
-              {e.table && e.table.headers && e.table.headers.length > 0 && (
-                <table className="nj-view-table">
-                  <thead>
-                    <tr>
-                      {e.table.headers.map((h, i) => (
-                        <th key={i}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {e.table.rows.map((row, ri) => (
-                      <tr key={ri}>
-                        {row.map((cell, ci) => (
-                          <td key={ci}>{cell}</td>
+              {(() => {
+                const table = normalizeTable(e.table);
+                if (!table || !table.headers || table.headers.length === 0) return null;
+                return (
+                  <table className="nj-view-table">
+                    <thead>
+                      <tr>
+                        {table.headers.map((h, i) => (
+                          <th key={i}>{h}</th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    </thead>
+                    <tbody>
+                      {table.rows.map((row, ri) => (
+                        <tr key={ri}>
+                          {row.map((cell, ci) => (
+                            <td
+                              key={ci}
+                              style={{
+                                fontWeight: cell.bold ? 700 : 400,
+                                textDecoration: cell.underline ? "underline" : "none",
+                                color: cell.color || "inherit",
+                                borderColor: cell.borderColor || undefined,
+                                borderWidth: cell.borderColor ? 2 : 1,
+                              }}
+                            >
+                              {cell.text}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
               <div className="nj-entry-ai-kw">
                 <div className="nj-entry-ai-kw-head">
                   <span className="nj-entry-ai-kw-label">AI 추천 키워드</span>
@@ -1840,6 +1997,40 @@ export default function NewsJournal() {
               <div className="nj-mini-label" style={{ marginBottom: 6 }}>
                 엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요.
               </div>
+              {(() => {
+                const focusedLine = fSummaryLines.find((l) => l.id === focusedLineId);
+                return (
+                  <div className="nj-format-toolbar">
+                    <button
+                      className={focusedLine?.bold ? "active" : ""}
+                      title="굵게"
+                      onClick={() => toggleLineStyle(focusedLineId, "bold")}
+                    >
+                      <Bold size={13} />
+                    </button>
+                    <button
+                      className={focusedLine?.underline ? "active" : ""}
+                      title="밑줄"
+                      onClick={() => toggleLineStyle(focusedLineId, "underline")}
+                    >
+                      <Underline size={13} />
+                    </button>
+                    <span className="nj-toolbar-divider" />
+                    {TEXT_COLOR_PRESETS.map((c) => (
+                      <button
+                        key={c}
+                        className={`nj-color-swatch${focusedLine?.color === c ? " active" : ""}`}
+                        style={{ background: c }}
+                        title={c}
+                        onClick={() => setLineColor(focusedLineId, c)}
+                      />
+                    ))}
+                    <button className="nj-color-swatch reset" title="색상 초기화" onClick={() => setLineColor(focusedLineId, null)}>
+                      <X size={10} />
+                    </button>
+                  </div>
+                );
+              })()}
               <div className="nj-bullet-editor">
                 {fSummaryLines.map((line, i) => (
                   <div className="nj-bullet-row" key={line.id}>
@@ -1849,9 +2040,15 @@ export default function NewsJournal() {
                         if (el) lineInputRefs.current[line.id] = el;
                       }}
                       className="nj-bullet-input"
+                      style={{
+                        fontWeight: line.bold ? 700 : 400,
+                        textDecoration: line.underline ? "underline" : "none",
+                        color: line.color || "var(--text)",
+                      }}
                       value={line.text}
                       onChange={(ev) => updateLineText(line.id, ev.target.value)}
                       onKeyDown={(ev) => handleLineKeyDown(line.id, ev)}
+                      onFocus={() => setFocusedLineId(line.id)}
                       placeholder={
                         i === 0 ? (formType === "youtube" ? "이 영상을 왜 중요하다고 봤는지 적어주세요" : "이 뉴스를 왜 중요하다고 봤는지 적어주세요") : ""
                       }
@@ -1862,6 +2059,73 @@ export default function NewsJournal() {
 
               {fTable ? (
                 <div className="nj-table-editor">
+                  {(() => {
+                    const cell = focusedCell ? fTable.rows[focusedCell.rowIdx]?.[focusedCell.colIdx] : null;
+                    return (
+                      <div className="nj-format-toolbar">
+                        <button
+                          className={cell?.bold ? "active" : ""}
+                          title="굵게"
+                          disabled={!focusedCell}
+                          onClick={() => focusedCell && toggleTableCellStyle(focusedCell.rowIdx, focusedCell.colIdx, "bold")}
+                        >
+                          <Bold size={13} />
+                        </button>
+                        <button
+                          className={cell?.underline ? "active" : ""}
+                          title="밑줄"
+                          disabled={!focusedCell}
+                          onClick={() => focusedCell && toggleTableCellStyle(focusedCell.rowIdx, focusedCell.colIdx, "underline")}
+                        >
+                          <Underline size={13} />
+                        </button>
+                        <span className="nj-toolbar-divider" />
+                        <span className="nj-toolbar-label">
+                          <Palette size={11} /> 글자
+                        </span>
+                        {TEXT_COLOR_PRESETS.map((c) => (
+                          <button
+                            key={"tc" + c}
+                            className={`nj-color-swatch${cell?.color === c ? " active" : ""}`}
+                            style={{ background: c }}
+                            title={c}
+                            disabled={!focusedCell}
+                            onClick={() => focusedCell && setTableCellColor(focusedCell.rowIdx, focusedCell.colIdx, c)}
+                          />
+                        ))}
+                        <button
+                          className="nj-color-swatch reset"
+                          title="글자색 초기화"
+                          disabled={!focusedCell}
+                          onClick={() => focusedCell && setTableCellColor(focusedCell.rowIdx, focusedCell.colIdx, null)}
+                        >
+                          <X size={10} />
+                        </button>
+                        <span className="nj-toolbar-divider" />
+                        <span className="nj-toolbar-label">
+                          <Square size={11} /> 테두리
+                        </span>
+                        {TEXT_COLOR_PRESETS.map((c) => (
+                          <button
+                            key={"bc" + c}
+                            className={`nj-color-swatch${cell?.borderColor === c ? " active" : ""}`}
+                            style={{ background: c }}
+                            title={c}
+                            disabled={!focusedCell}
+                            onClick={() => focusedCell && setTableCellBorderColor(focusedCell.rowIdx, focusedCell.colIdx, c)}
+                          />
+                        ))}
+                        <button
+                          className="nj-color-swatch reset"
+                          title="테두리색 초기화"
+                          disabled={!focusedCell}
+                          onClick={() => focusedCell && setTableCellBorderColor(focusedCell.rowIdx, focusedCell.colIdx, null)}
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    );
+                  })()}
                   <table className="nj-edit-table">
                     <thead>
                       <tr>
@@ -1884,8 +2148,20 @@ export default function NewsJournal() {
                       {fTable.rows.map((row, ri) => (
                         <tr key={ri}>
                           {row.map((cell, ci) => (
-                            <td key={ci}>
-                              <input value={cell} onChange={(ev) => updateTableCell(ri, ci, ev.target.value)} />
+                            <td
+                              key={ci}
+                              style={{ borderColor: cell.borderColor || undefined, borderWidth: cell.borderColor ? 2 : 1 }}
+                            >
+                              <input
+                                value={cell.text}
+                                style={{
+                                  fontWeight: cell.bold ? 700 : 400,
+                                  textDecoration: cell.underline ? "underline" : "none",
+                                  color: cell.color || "var(--text)",
+                                }}
+                                onChange={(ev) => updateTableCellText(ri, ci, ev.target.value)}
+                                onFocus={() => setFocusedCell({ rowIdx: ri, colIdx: ci })}
+                              />
                             </td>
                           ))}
                           <td className="nj-table-row-remove">
