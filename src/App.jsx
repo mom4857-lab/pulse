@@ -936,6 +936,7 @@ export default function NewsJournal() {
           --tier3: #64748b;
           --gold: #f2b84b;
           --youtube: #ff3b3b;
+          --news: #4d9fff;
           font-family: 'Inter', sans-serif;
           color: var(--text);
           background: var(--bg);
@@ -1084,15 +1085,15 @@ export default function NewsJournal() {
         .nj-clear-tag { font-size: 12px; color: var(--rose); background: none; border: none; cursor: pointer; text-decoration: underline; }
 
         .nj-entry {
-          background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+          background: var(--surface); border: 1.5px solid rgba(77,159,255,0.55); border-radius: 12px;
           padding: 14px 16px; margin-bottom: 10px; transition: border-color .15s ease;
         }
-        .nj-entry:hover { border-color: rgba(45,212,191,0.35); }
+        .nj-entry:hover { border-color: var(--news); }
         .nj-entry.youtube {
           background: radial-gradient(140% 100% at 0% 0%, rgba(255,59,59,0.08), transparent 60%), var(--surface);
-          border-color: rgba(255,59,59,0.28); border-left: 3px solid var(--youtube);
+          border: 1.5px solid rgba(255,59,59,0.6);
         }
-        .nj-entry.youtube:hover { border-color: rgba(255,59,59,0.5); }
+        .nj-entry.youtube:hover { border-color: var(--youtube); }
         .nj-entry-badge {
           display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700;
           padding: 2px 7px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; width: fit-content;
