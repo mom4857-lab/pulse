@@ -118,6 +118,34 @@ function decodeEntities(str) {
   return el.value;
 }
 const NO_MARKER_PREFIX = "\u2063";
+function makeLineId() {
+  return "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function escapeHtml(str) {
+  return (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+// Light defensive pass before rendering any stored HTML — this is the
+// user's own authored content (no multi-user sharing), but strip anything
+// that could execute as a cheap safety net anyway.
+function sanitizeInlineHtml(html) {
+  if (!html) return "";
+  let out = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "");
+  out = out.replace(/\son\w+="[^"]*"/gi, "").replace(/\son\w+='[^']*'/gi, "");
+  out = out.replace(/javascript:/gi, "");
+  return out;
+}
+// Converts a line/cell record into HTML for display or for initializing a
+// contentEditable element. Prefers the real per-selection `html` field;
+// falls back to wrapping the whole text in bold/underline/color tags for
+// entries saved under the older whole-line/whole-cell formatting scheme.
+function richFieldToHtml(field) {
+  if (field.html !== undefined && field.html !== null) return field.html;
+  let inner = escapeHtml(field.text || "");
+  if (field.color) inner = `<span style="color:${field.color}">${inner}</span>`;
+  if (field.underline) inner = `<u>${inner}</u>`;
+  if (field.bold) inner = `<b>${inner}</b>`;
+  return inner;
+}
 function parseSummaryLines(summary) {
   return (summary || "")
     .split("\n")
@@ -144,13 +172,10 @@ function splitKoreanSentences(text) {
     .map((s) => s.trim())
     .filter(Boolean);
 }
-function makeLineId() {
-  return "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
 function linesFromSummaryText(summary) {
   const parsed = parseSummaryLinesRich(summary);
-  if (parsed.length === 0) return [{ id: makeLineId(), text: "", noMarker: false, bold: false, underline: false, color: null }];
-  return parsed.map(({ text, noMarker }) => ({ id: makeLineId(), text, noMarker, bold: false, underline: false, color: null }));
+  if (parsed.length === 0) return [{ id: makeLineId(), text: "", html: "", noMarker: false }];
+  return parsed.map(({ text, noMarker }) => ({ id: makeLineId(), text, html: escapeHtml(text), noMarker }));
 }
 // Loads bullet lines for editing, preferring the richer saved format
 // (entry.summaryLines) when present, falling back to plain-text parsing
@@ -160,10 +185,8 @@ function linesFromEntry(entry) {
     return entry.summaryLines.map((l) => ({
       id: makeLineId(),
       text: l.text || "",
+      html: richFieldToHtml(l),
       noMarker: !!l.noMarker,
-      bold: !!l.bold,
-      underline: !!l.underline,
-      color: l.color || null,
     }));
   }
   return linesFromSummaryText(entry.summary || "");
@@ -171,19 +194,21 @@ function linesFromEntry(entry) {
 // Same idea for read-only display: use the rich saved lines when present.
 function getSummaryLines(entry) {
   if (Array.isArray(entry.summaryLines) && entry.summaryLines.length > 0) {
-    return entry.summaryLines.map((l) => ({
-      text: l.text || "",
-      noMarker: !!l.noMarker,
-      bold: !!l.bold,
-      underline: !!l.underline,
-      color: l.color || null,
-    }));
+    return entry.summaryLines.map((l) => ({ text: l.text || "", noMarker: !!l.noMarker, html: richFieldToHtml(l) }));
   }
-  return parseSummaryLinesRich(entry.summary).map((l) => ({ ...l, bold: false, underline: false, color: null }));
+  return parseSummaryLinesRich(entry.summary).map((l) => ({ ...l, html: escapeHtml(l.text) }));
 }
 const TEXT_COLOR_PRESETS = ["#fb7185", "#f2b84b", "#34d399", "#60a5fa", "#a78bfa", "#e5e9f0"];
+const DEFAULT_TEXT_COLOR = "#e9ecf3";
+function hexToRgbString(hex) {
+  const bigint = parseInt(hex.replace("#", ""), 16);
+  const r = (bigint >> 16) & 255,
+    g = (bigint >> 8) & 255,
+    b = bigint & 255;
+  return `rgb(${r}, ${g}, ${b})`;
+}
 function blankTableCell() {
-  return { text: "", bold: false, underline: false, color: null, borderColor: null };
+  return { text: "", html: "", borderColor: null };
 }
 // Old saved tables stored plain strings per cell; normalize to the richer
 // cell-object format so both old and new entries render/edit the same way.
@@ -191,9 +216,74 @@ function normalizeTable(table) {
   if (!table) return null;
   return {
     headers: table.headers || [],
-    rows: (table.rows || []).map((row) => row.map((cell) => (typeof cell === "string" ? { ...blankTableCell(), text: cell } : cell))),
+    rows: (table.rows || []).map((row) =>
+      row.map((cell) => {
+        if (typeof cell === "string") return { ...blankTableCell(), text: cell, html: escapeHtml(cell) };
+        return { ...cell, html: richFieldToHtml(cell) };
+      })
+    ),
   };
 }
+// --- caret/range helpers for the contentEditable bullet lines & table cells ---
+function getCaretOffsetInEditable(el) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return 0;
+  const range = sel.getRangeAt(0);
+  const preRange = range.cloneRange();
+  preRange.selectNodeContents(el);
+  preRange.setEnd(range.endContainer, range.endOffset);
+  return preRange.toString().length;
+}
+function isCaretAtStart(el) {
+  return getCaretOffsetInEditable(el) === 0;
+}
+function setCaretOffset(el, offset) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  let remaining = offset;
+  let node = null;
+  let nodeOffset = 0;
+  (function walk(n) {
+    if (node) return;
+    if (n.nodeType === Node.TEXT_NODE) {
+      if (remaining <= n.textContent.length) {
+        node = n;
+        nodeOffset = remaining;
+        return;
+      }
+      remaining -= n.textContent.length;
+    } else {
+      for (const child of n.childNodes) {
+        walk(child);
+        if (node) return;
+      }
+    }
+  })(el);
+  if (!node) {
+    node = el;
+    nodeOffset = el.childNodes.length;
+  }
+  range.setStart(node, nodeOffset);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+// Splits a contentEditable element's content at the caret. Mutates `el` to
+// keep only the "before" portion; returns the "after" portion's HTML/text.
+function splitContentEditableAtCaret(el) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return { afterHtml: "", afterText: "" };
+  const range = sel.getRangeAt(0);
+  const afterRange = range.cloneRange();
+  afterRange.selectNodeContents(el);
+  afterRange.setStart(range.endContainer, range.endOffset);
+  const afterFragment = afterRange.extractContents();
+  const afterDiv = document.createElement("div");
+  afterDiv.appendChild(afterFragment);
+  return { afterHtml: afterDiv.innerHTML, afterText: afterDiv.textContent };
+}
+
 
 export default function NewsJournal() {
   const [entries, setEntries] = useState([]);
@@ -232,7 +322,9 @@ export default function NewsJournal() {
   const [fSummaryLines, setFSummaryLines] = useState(() => [{ id: makeLineId(), text: "" }]);
   const [focusedLineId, setFocusedLineId] = useState(null);
   const [focusedCell, setFocusedCell] = useState(null);
+  const [fmtState, setFmtState] = useState({ bold: false, underline: false, color: null });
   const lineInputRefs = useRef({});
+  const cellInputRefs = useRef({});
 
   useEffect(() => {
     (async () => {
@@ -364,12 +456,14 @@ export default function NewsJournal() {
     setFIndustryTags([]);
     setFStockTags([]);
     setFTechTags([]);
-    const firstLine = { id: makeLineId(), text: "", noMarker: false, bold: false, underline: false, color: null };
+    const firstLine = { id: makeLineId(), text: "", html: "", noMarker: false };
     setFSummaryLines([firstLine]);
     setFocusedLineId(firstLine.id);
     setFocusedCell(null);
+    setFmtState({ bold: false, underline: false, color: null });
     setFTable(null);
     lineInputRefs.current = {};
+    cellInputRefs.current = {};
   }
 
   function openEdit(entry) {
@@ -389,27 +483,50 @@ export default function NewsJournal() {
     setFocusedLineId(lines[0]?.id || null);
     setFocusedCell(null);
     setFTable(normalizeTable(entry.table));
+    setFmtState({ bold: false, underline: false, color: null });
     lineInputRefs.current = {};
+    cellInputRefs.current = {};
     setShowForm(true);
   }
 
-  function updateLineText(id, text) {
-    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, text } : l)));
+  function syncLineFromDom(id, el) {
+    const html = el.innerHTML;
+    const text = el.textContent;
+    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, html, text } : l)));
   }
 
-  function toggleLineStyle(id, key) {
-    if (!id) return;
-    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, [key]: !l[key] } : l)));
+  function updateFmtState() {
+    try {
+      let color = null;
+      const raw = document.queryCommandValue("foreColor");
+      if (raw) {
+        const match = TEXT_COLOR_PRESETS.find((c) => hexToRgbString(c) === raw);
+        color = match || null;
+      }
+      setFmtState({
+        bold: document.queryCommandState("bold"),
+        underline: document.queryCommandState("underline"),
+        color,
+      });
+    } catch (e) {
+      // queryCommandState can throw if nothing is focused/selected — ignore.
+    }
   }
 
-  function setLineColor(id, color) {
-    if (!id) return;
-    setFSummaryLines((lines) => lines.map((l) => (l.id === id ? { ...l, color } : l)));
+  function applyLineFormat(command, value) {
+    const el = lineInputRefs.current[focusedLineId];
+    if (!el) return;
+    el.focus();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand(command, false, value);
+    syncLineFromDom(focusedLineId, el);
+    updateFmtState();
   }
 
   function handleLineKeyDown(id, e) {
     const idx = fSummaryLines.findIndex((l) => l.id === id);
     if (idx === -1) return;
+    const el = e.currentTarget;
 
     if (e.key === "Enter" && e.altKey) {
       e.preventDefault();
@@ -419,43 +536,46 @@ export default function NewsJournal() {
 
     if (e.key === "Enter") {
       e.preventDefault();
-      const input = e.target;
-      const cursor = input.selectionStart ?? fSummaryLines[idx].text.length;
-      const text = fSummaryLines[idx].text;
-      const before = text.slice(0, cursor);
-      const after = text.slice(cursor);
+      const { afterHtml, afterText } = splitContentEditableAtCaret(el);
       const newId = makeLineId();
+      const beforeHtml = el.innerHTML;
+      const beforeText = el.textContent;
       const newLines = fSummaryLines.slice();
-      newLines[idx] = { ...newLines[idx], text: before };
-      newLines.splice(idx + 1, 0, { id: newId, text: after, noMarker: false, bold: false, underline: false, color: null });
+      newLines[idx] = { ...newLines[idx], html: beforeHtml, text: beforeText };
+      newLines.splice(idx + 1, 0, { id: newId, text: afterText, html: afterHtml, noMarker: false });
       setFSummaryLines(newLines);
       setFocusedLineId(newId);
       requestAnimationFrame(() => {
-        const el = lineInputRefs.current[newId];
-        if (el) {
-          el.focus();
-          el.setSelectionRange(0, 0);
+        const newEl = lineInputRefs.current[newId];
+        if (newEl) {
+          newEl.focus();
+          setCaretOffset(newEl, 0);
         }
       });
-    } else if (e.key === "Backspace") {
-      const input = e.target;
-      if (input.selectionStart === 0 && input.selectionEnd === 0 && idx > 0) {
+      return;
+    }
+
+    if (e.key === "Backspace") {
+      if (isCaretAtStart(el) && idx > 0) {
         e.preventDefault();
         const prevLine = fSummaryLines[idx - 1];
-        const mergedText = prevLine.text + fSummaryLines[idx].text;
-        const mergeCursor = prevLine.text.length;
+        const prevEl = lineInputRefs.current[prevLine.id];
+        if (!prevEl) return;
+        const mergeCursor = prevEl.textContent.length;
+        prevEl.innerHTML = prevEl.innerHTML + el.innerHTML;
         const newLines = fSummaryLines.filter((_, i) => i !== idx);
-        newLines[idx - 1] = { ...prevLine, text: mergedText };
+        newLines[idx - 1] = { ...prevLine, html: prevEl.innerHTML, text: prevEl.textContent };
         setFSummaryLines(newLines);
+        setFocusedLineId(prevLine.id);
         requestAnimationFrame(() => {
-          const el = lineInputRefs.current[prevLine.id];
-          if (el) {
-            el.focus();
-            el.setSelectionRange(mergeCursor, mergeCursor);
-          }
+          prevEl.focus();
+          setCaretOffset(prevEl, mergeCursor);
         });
       }
-    } else if (e.key === "ArrowUp") {
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
       if (idx > 0) {
         e.preventDefault();
         const targetId = fSummaryLines[idx - 1].id;
@@ -509,23 +629,24 @@ export default function NewsJournal() {
   function updateTableHeader(colIdx, value) {
     setFTable((t) => ({ ...t, headers: t.headers.map((h, i) => (i === colIdx ? value : h)) }));
   }
-  function updateTableCellText(rowIdx, colIdx, value) {
+  function syncCellFromDom(rowIdx, colIdx, el) {
+    const html = el.innerHTML;
+    const text = el.textContent;
     setFTable((t) => ({
       ...t,
-      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, text: value } : c)) : row)),
+      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, html, text } : c)) : row)),
     }));
   }
-  function toggleTableCellStyle(rowIdx, colIdx, key) {
-    setFTable((t) => ({
-      ...t,
-      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, [key]: !c[key] } : c)) : row)),
-    }));
-  }
-  function setTableCellColor(rowIdx, colIdx, color) {
-    setFTable((t) => ({
-      ...t,
-      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? { ...c, color } : c)) : row)),
-    }));
+  function applyCellFormat(command, value) {
+    if (!focusedCell) return;
+    const key = `${focusedCell.rowIdx}-${focusedCell.colIdx}`;
+    const el = cellInputRefs.current[key];
+    if (!el) return;
+    el.focus();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand(command, false, value);
+    syncCellFromDom(focusedCell.rowIdx, focusedCell.colIdx, el);
+    updateFmtState();
   }
   function setTableCellBorderColor(rowIdx, colIdx, borderColor) {
     setFTable((t) => ({
@@ -645,13 +766,11 @@ export default function NewsJournal() {
 
   function handleSave() {
     const savedLines = fSummaryLines
-      .filter((l) => l.text.trim())
+      .filter((l) => (l.text || "").trim())
       .map((l) => ({
         text: l.text.trim(),
+        html: l.html || escapeHtml(l.text.trim()),
         noMarker: !!l.noMarker,
-        bold: !!l.bold,
-        underline: !!l.underline,
-        color: l.color || null,
       }));
     const fSummary = savedLines.map((l) => (l.noMarker ? NO_MARKER_PREFIX : "") + l.text).join("\n");
     if (!fTitle.trim() && !fUrl.trim()) {
@@ -1090,12 +1209,15 @@ export default function NewsJournal() {
           border: 1px solid var(--line); background: var(--surface-raised); border-radius: 8px;
           padding: 8px 10px; min-height: 110px;
         }
-        .nj-bullet-row { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
+        .nj-bullet-row { display: flex; align-items: flex-start; gap: 9px; padding: 3px 0; }
         .nj-bullet-input {
-          flex: 1; border: none; background: none; outline: none; color: var(--text);
+          flex: 1; outline: none; color: var(--text); min-height: 1.4em;
           font-family: 'Inter', sans-serif; font-size: 13.5px; padding: 2px 0;
+          white-space: pre-wrap; word-break: break-word;
         }
-        .nj-bullet-input::placeholder { color: var(--text-soft); }
+        .nj-bullet-input:empty:before { content: attr(data-placeholder); color: var(--text-soft); pointer-events: none; }
+        .nj-bullet-input b, .nj-table-cell-input b { font-weight: 700; }
+        .nj-bullet-input u, .nj-table-cell-input u { text-decoration: underline; }
 
         .nj-add-table-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; }
 
@@ -1121,16 +1243,20 @@ export default function NewsJournal() {
         .nj-color-swatch.active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
         .nj-color-swatch.reset { background: var(--surface); color: var(--text-soft); border-style: dashed; }
         .nj-color-swatch.reset:hover { color: var(--rose); border-color: var(--rose); }
+        .nj-color-swatch:disabled { opacity: 0.35; cursor: default; }
         .nj-table-editor { margin-top: 10px; }
         .nj-edit-table { width: 100%; border-collapse: collapse; }
         .nj-edit-table th, .nj-edit-table td {
           border: 1px solid var(--line); padding: 4px; text-align: left;
         }
-        .nj-edit-table th input, .nj-edit-table td input {
-          width: 100%; border: none; background: none; color: var(--text); font-size: 12.5px; padding: 4px;
-          font-family: 'Inter', sans-serif; box-sizing: border-box;
+        .nj-edit-table th input {
+          width: 100%; border: none; background: none; font-size: 12.5px; padding: 4px;
+          font-family: 'Inter', sans-serif; box-sizing: border-box; color: var(--violet); font-weight: 700;
         }
-        .nj-edit-table th input { color: var(--violet); font-weight: 700; }
+        .nj-table-cell-input {
+          width: 100%; min-height: 1.3em; outline: none; color: var(--text); font-size: 12.5px; padding: 4px;
+          font-family: 'Inter', sans-serif; box-sizing: border-box; white-space: pre-wrap; word-break: break-word;
+        }
         .nj-edit-table th, .nj-edit-table td.nj-table-row-remove, .nj-edit-table th.nj-table-add-col {
           position: relative;
         }
@@ -1650,15 +1776,7 @@ export default function NewsJournal() {
                 {getSummaryLines(e).map((line, i) => (
                   <div className="nj-summary-line" key={i}>
                     <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
-                    <span
-                      style={{
-                        fontWeight: line.bold ? 700 : 400,
-                        textDecoration: line.underline ? "underline" : "none",
-                        color: line.color || "inherit",
-                      }}
-                    >
-                      {line.text}
-                    </span>
+                    <span dangerouslySetInnerHTML={{ __html: sanitizeInlineHtml(line.html) }} />
                   </div>
                 ))}
               </div>
@@ -1681,14 +1799,11 @@ export default function NewsJournal() {
                             <td
                               key={ci}
                               style={{
-                                fontWeight: cell.bold ? 700 : 400,
-                                textDecoration: cell.underline ? "underline" : "none",
-                                color: cell.color || "inherit",
                                 borderColor: cell.borderColor || undefined,
                                 borderWidth: cell.borderColor ? 2 : 1,
                               }}
                             >
-                              {cell.text}
+                              <span dangerouslySetInnerHTML={{ __html: sanitizeInlineHtml(cell.html) }} />
                             </td>
                           ))}
                         </tr>
@@ -1997,61 +2112,56 @@ export default function NewsJournal() {
               <div className="nj-mini-label" style={{ marginBottom: 6 }}>
                 엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요.
               </div>
-              {(() => {
-                const focusedLine = fSummaryLines.find((l) => l.id === focusedLineId);
-                return (
-                  <div className="nj-format-toolbar">
-                    <button
-                      className={focusedLine?.bold ? "active" : ""}
-                      title="굵게"
-                      onClick={() => toggleLineStyle(focusedLineId, "bold")}
-                    >
-                      <Bold size={13} />
-                    </button>
-                    <button
-                      className={focusedLine?.underline ? "active" : ""}
-                      title="밑줄"
-                      onClick={() => toggleLineStyle(focusedLineId, "underline")}
-                    >
-                      <Underline size={13} />
-                    </button>
-                    <span className="nj-toolbar-divider" />
-                    {TEXT_COLOR_PRESETS.map((c) => (
-                      <button
-                        key={c}
-                        className={`nj-color-swatch${focusedLine?.color === c ? " active" : ""}`}
-                        style={{ background: c }}
-                        title={c}
-                        onClick={() => setLineColor(focusedLineId, c)}
-                      />
-                    ))}
-                    <button className="nj-color-swatch reset" title="색상 초기화" onClick={() => setLineColor(focusedLineId, null)}>
-                      <X size={10} />
-                    </button>
-                  </div>
-                );
-              })()}
+              <div className="nj-mini-label" style={{ marginBottom: 6 }}>
+                엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요. 텍스트를 드래그해서 선택하면 그 부분에만 서식을 넣을 수 있어요.
+              </div>
+              <div className="nj-format-toolbar">
+                <button className={fmtState.bold ? "active" : ""} title="굵게" onClick={() => applyLineFormat("bold")}>
+                  <Bold size={13} />
+                </button>
+                <button className={fmtState.underline ? "active" : ""} title="밑줄" onClick={() => applyLineFormat("underline")}>
+                  <Underline size={13} />
+                </button>
+                <span className="nj-toolbar-divider" />
+                {TEXT_COLOR_PRESETS.map((c) => (
+                  <button
+                    key={c}
+                    className={`nj-color-swatch${fmtState.color === c ? " active" : ""}`}
+                    style={{ background: c }}
+                    title={c}
+                    onClick={() => applyLineFormat("foreColor", c)}
+                  />
+                ))}
+                <button className="nj-color-swatch reset" title="색상 초기화" onClick={() => applyLineFormat("foreColor", DEFAULT_TEXT_COLOR)}>
+                  <X size={10} />
+                </button>
+              </div>
               <div className="nj-bullet-editor">
                 {fSummaryLines.map((line, i) => (
                   <div className="nj-bullet-row" key={line.id}>
                     <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
-                    <input
+                    <div
                       ref={(el) => {
-                        if (el) lineInputRefs.current[line.id] = el;
+                        if (el && !el.dataset.init) {
+                          el.innerHTML = sanitizeInlineHtml(richFieldToHtml(line));
+                          el.dataset.init = "1";
+                        }
+                        lineInputRefs.current[line.id] = el;
                       }}
                       className="nj-bullet-input"
-                      style={{
-                        fontWeight: line.bold ? 700 : 400,
-                        textDecoration: line.underline ? "underline" : "none",
-                        color: line.color || "var(--text)",
-                      }}
-                      value={line.text}
-                      onChange={(ev) => updateLineText(line.id, ev.target.value)}
-                      onKeyDown={(ev) => handleLineKeyDown(line.id, ev)}
-                      onFocus={() => setFocusedLineId(line.id)}
-                      placeholder={
+                      contentEditable
+                      suppressContentEditableWarning
+                      data-placeholder={
                         i === 0 ? (formType === "youtube" ? "이 영상을 왜 중요하다고 봤는지 적어주세요" : "이 뉴스를 왜 중요하다고 봤는지 적어주세요") : ""
                       }
+                      onInput={(ev) => syncLineFromDom(line.id, ev.currentTarget)}
+                      onKeyDown={(ev) => handleLineKeyDown(line.id, ev)}
+                      onFocus={() => {
+                        setFocusedLineId(line.id);
+                        updateFmtState();
+                      }}
+                      onKeyUp={updateFmtState}
+                      onMouseUp={updateFmtState}
                     />
                   </div>
                 ))}
@@ -2064,18 +2174,18 @@ export default function NewsJournal() {
                     return (
                       <div className="nj-format-toolbar">
                         <button
-                          className={cell?.bold ? "active" : ""}
+                          className={fmtState.bold ? "active" : ""}
                           title="굵게"
                           disabled={!focusedCell}
-                          onClick={() => focusedCell && toggleTableCellStyle(focusedCell.rowIdx, focusedCell.colIdx, "bold")}
+                          onClick={() => applyCellFormat("bold")}
                         >
                           <Bold size={13} />
                         </button>
                         <button
-                          className={cell?.underline ? "active" : ""}
+                          className={fmtState.underline ? "active" : ""}
                           title="밑줄"
                           disabled={!focusedCell}
-                          onClick={() => focusedCell && toggleTableCellStyle(focusedCell.rowIdx, focusedCell.colIdx, "underline")}
+                          onClick={() => applyCellFormat("underline")}
                         >
                           <Underline size={13} />
                         </button>
@@ -2086,18 +2196,18 @@ export default function NewsJournal() {
                         {TEXT_COLOR_PRESETS.map((c) => (
                           <button
                             key={"tc" + c}
-                            className={`nj-color-swatch${cell?.color === c ? " active" : ""}`}
+                            className={`nj-color-swatch${fmtState.color === c ? " active" : ""}`}
                             style={{ background: c }}
                             title={c}
                             disabled={!focusedCell}
-                            onClick={() => focusedCell && setTableCellColor(focusedCell.rowIdx, focusedCell.colIdx, c)}
+                            onClick={() => applyCellFormat("foreColor", c)}
                           />
                         ))}
                         <button
                           className="nj-color-swatch reset"
                           title="글자색 초기화"
                           disabled={!focusedCell}
-                          onClick={() => focusedCell && setTableCellColor(focusedCell.rowIdx, focusedCell.colIdx, null)}
+                          onClick={() => applyCellFormat("foreColor", DEFAULT_TEXT_COLOR)}
                         >
                           <X size={10} />
                         </button>
@@ -2152,15 +2262,24 @@ export default function NewsJournal() {
                               key={ci}
                               style={{ borderColor: cell.borderColor || undefined, borderWidth: cell.borderColor ? 2 : 1 }}
                             >
-                              <input
-                                value={cell.text}
-                                style={{
-                                  fontWeight: cell.bold ? 700 : 400,
-                                  textDecoration: cell.underline ? "underline" : "none",
-                                  color: cell.color || "var(--text)",
+                              <div
+                                ref={(el) => {
+                                  if (el && !el.dataset.init) {
+                                    el.innerHTML = sanitizeInlineHtml(richFieldToHtml(cell));
+                                    el.dataset.init = "1";
+                                  }
+                                  cellInputRefs.current[`${ri}-${ci}`] = el;
                                 }}
-                                onChange={(ev) => updateTableCellText(ri, ci, ev.target.value)}
-                                onFocus={() => setFocusedCell({ rowIdx: ri, colIdx: ci })}
+                                className="nj-table-cell-input"
+                                contentEditable
+                                suppressContentEditableWarning
+                                onInput={(ev) => syncCellFromDom(ri, ci, ev.currentTarget)}
+                                onFocus={() => {
+                                  setFocusedCell({ rowIdx: ri, colIdx: ci });
+                                  updateFmtState();
+                                }}
+                                onKeyUp={updateFmtState}
+                                onMouseUp={updateFmtState}
                               />
                             </td>
                           ))}
