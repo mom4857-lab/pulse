@@ -91,7 +91,7 @@ async function handleAnalyzePeriod(request, env) {
     koreanOnlyRule +
     "\n\n과도한 확신이나 투자 추천, 매수·매도 권유는 하지 마라. " +
     "기록의 문장을 그대로 옮기지 말고 종합적인 분석으로 정리해라. " +
-    '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해.\n' +
+    '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해. 전체 응답은 한 줄로, 문자열 안에 실제 줄바꿈을 넣지 말고 반드시 \\n으로 이스케이프해라.\n' +
     '{"coreFlow": "...", "connections": "...", "signals": "...", "keywords": ["단일 용어 10개"]}\n\n' +
     `---\n[사용자 기록]\n${digest}`;
 
@@ -129,7 +129,11 @@ async function handleAnalyzePeriod(request, env) {
     try {
       let cleaned = rawText.trim();
       cleaned = cleaned.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-      parsed = JSON.parse(cleaned);
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (firstErr) {
+        parsed = JSON.parse(repairJsonNewlines(cleaned));
+      }
     } catch (parseErr) {
       // Model didn't return clean JSON — put everything in coreFlow as a fallback.
       parsed = { coreFlow: rawText, connections: "", signals: "", keywords: [] };
@@ -206,7 +210,7 @@ async function handleEntryKeywords(request, env) {
         koreanOnlyRule;
 
   const jsonInstruction =
-    '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해.\n' +
+    '반드시 아래 JSON 형식으로만 응답해. 코드블록 표시(```)나 다른 설명 문장 없이 JSON 객체 하나만 출력해. 전체 응답은 한 줄로, 문자열 안에 실제 줄바꿈을 넣지 말고 반드시 \\n으로 이스케이프해라.\n' +
     '{"stockKeywords": ["단일 용어 상장기업 키워드 (최대 5개, 괄호/슬래시 금지)"], ' +
     '"techKeywords": ["단일 용어 핵심부품/기술/제품 키워드 (최대 5개, 괄호/슬래시 금지)"]}';
 
@@ -249,7 +253,11 @@ async function handleEntryKeywords(request, env) {
     try {
       let cleaned = rawText.trim();
       cleaned = cleaned.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-      parsed = JSON.parse(cleaned);
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (firstErr) {
+        parsed = JSON.parse(repairJsonNewlines(cleaned));
+      }
     } catch (parseErr) {
       parsed = { stockKeywords: [], techKeywords: [] };
     }
@@ -316,6 +324,42 @@ async function extractReadableText(html) {
 // Safety net in case the model still returns compound keywords despite the
 // prompt instruction — splits on slash/comma, unwraps "A(B)" into A and B as
 // separate candidates, dedupes, and caps to maxCount.
+// The model sometimes returns otherwise-valid-looking JSON but with real
+// newline characters left inside string values (instead of escaped \n),
+// which makes JSON.parse throw. This walks the text tracking whether we're
+// inside a string literal (respecting escape sequences) and escapes any
+// raw newlines/carriage returns found there, without touching structural
+// whitespace between tokens.
+function repairJsonNewlines(str) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString && (ch === "\n" || ch === "\r")) {
+      out += "\\n";
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function normalizeKeywords(arr, maxCount) {
   if (!Array.isArray(arr)) return [];
 
