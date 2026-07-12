@@ -70,8 +70,9 @@ async function handleAnalyzePeriod(request, env) {
     ? "이번 분석 대상 기간은 " +
       (periodType === "year" ? "1년" : "1개월") +
       " 단위로 비교적 길기 때문에, coreFlow·connections·signals 각 항목을 4~6문장으로 좀 더 상세하게 작성해줘. " +
+      "단, 각 항목은 반드시 500자를 넘지 않게 써라 — 500자를 넘길 것 같으면 덜 중요한 내용을 줄여서라도 500자 이내로 맞춰라. " +
       "필요하면 기간 내 시간 흐름(초반/중반/후반)이나 하위 주제별로 나눠서 설명해도 좋다."
-    : "coreFlow·connections·signals 각 항목은 2~3문장으로 간결하게 작성해줘.";
+    : "coreFlow·connections·signals 각 항목은 2~3문장, 200자 이내로 간결하게 작성해줘.";
 
   const prompt =
     `다음은 한 개인 투자자가 ${periodLabelText} 기간 동안 직접 읽고 정리한 뉴스 기록 목록이다.\n\n` +
@@ -105,7 +106,7 @@ async function handleAnalyzePeriod(request, env) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: isDetailed ? 1500 : 1000,
+        max_tokens: isDetailed ? 2600 : 1200,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -135,8 +136,17 @@ async function handleAnalyzePeriod(request, env) {
         parsed = JSON.parse(repairJsonNewlines(cleaned));
       }
     } catch (parseErr) {
-      // Model didn't return clean JSON — put everything in coreFlow as a fallback.
-      parsed = { coreFlow: rawText, connections: "", signals: "", keywords: [] };
+      // JSON is malformed or truncated (usually cut off by the token limit).
+      // Salvage whichever fields did complete rather than dumping raw JSON text.
+      const coreFlow = extractPartialField(rawText, "coreFlow");
+      const connections = extractPartialField(rawText, "connections");
+      const signals = extractPartialField(rawText, "signals");
+      parsed = {
+        coreFlow: coreFlow || (connections || signals ? "" : "응답이 도중에 끊겼어요. 새로고침(↻)으로 다시 생성해보세요."),
+        connections,
+        signals,
+        keywords: [],
+      };
     }
 
     return json({
@@ -330,6 +340,16 @@ async function extractReadableText(html) {
 // inside a string literal (respecting escape sequences) and escapes any
 // raw newlines/carriage returns found there, without touching structural
 // whitespace between tokens.
+// Best-effort recovery for truncated JSON: pulls out a named string field's
+// value if it was fully written (opening AND closing quote both present)
+// before the response got cut off, ignoring anything mid-value.
+function extractPartialField(text, field) {
+  const re = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "s");
+  const m = text.match(re);
+  if (!m) return "";
+  return m[1].replace(/\\n/g, " ").replace(/\\"/g, '"').trim();
+}
+
 function repairJsonNewlines(str) {
   let out = "";
   let inString = false;
