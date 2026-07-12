@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil } from "lucide-react";
+import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2 } from "lucide-react";
 import { storage } from "./storage.js";
 
 const STORAGE_KEY = "news-journal-entries";
@@ -170,6 +170,9 @@ export default function NewsJournal() {
   const [analyzing, setAnalyzing] = useState(false);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const [cloudView, setCloudView] = useState("list");
+  const [showTypeChoice, setShowTypeChoice] = useState(false);
+  const [formType, setFormType] = useState("news");
+  const [fTable, setFTable] = useState(null);
   const listRef = useRef(null);
   const overlayMouseDownOnBackdrop = useRef(false);
 
@@ -317,11 +320,13 @@ export default function NewsJournal() {
     setFStockTags([]);
     setFTechTags([]);
     setFSummaryLines([{ id: makeLineId(), text: "" }]);
+    setFTable(null);
     lineInputRefs.current = {};
   }
 
   function openEdit(entry) {
     setEditingId(entry.id);
+    setFormType(entry.type === "youtube" ? "youtube" : "news");
     setFUrl(entry.url || "");
     setFTitle(entry.title || "");
     setFDate(entry.date || todayStr());
@@ -332,6 +337,7 @@ export default function NewsJournal() {
     setFStockTags(entry.stockTags || []);
     setFTechTags(entry.techTags || []);
     setFSummaryLines(linesFromSummaryText(entry.summary || ""));
+    setFTable(entry.table || null);
     lineInputRefs.current = {};
     setShowForm(true);
   }
@@ -429,6 +435,38 @@ export default function NewsJournal() {
       if (matches.length >= 6) break;
     }
     return matches;
+  }
+
+  function addTable() {
+    setFTable({ headers: ["항목", "내용"], rows: [["", ""]] });
+  }
+  function removeTable() {
+    setFTable(null);
+  }
+  function updateTableHeader(colIdx, value) {
+    setFTable((t) => ({ ...t, headers: t.headers.map((h, i) => (i === colIdx ? value : h)) }));
+  }
+  function updateTableCell(rowIdx, colIdx, value) {
+    setFTable((t) => ({
+      ...t,
+      rows: t.rows.map((row, ri) => (ri === rowIdx ? row.map((c, ci) => (ci === colIdx ? value : c)) : row)),
+    }));
+  }
+  function addTableRow() {
+    setFTable((t) => ({ ...t, rows: [...t.rows, t.headers.map(() => "")] }));
+  }
+  function removeTableRow(rowIdx) {
+    setFTable((t) => ({ ...t, rows: t.rows.filter((_, i) => i !== rowIdx) }));
+  }
+  function addTableColumn() {
+    setFTable((t) => ({ ...t, headers: [...t.headers, "항목"], rows: t.rows.map((r) => [...r, ""]) }));
+  }
+  function removeTableColumn(colIdx) {
+    setFTable((t) => ({
+      ...t,
+      headers: t.headers.filter((_, i) => i !== colIdx),
+      rows: t.rows.map((r) => r.filter((_, i) => i !== colIdx)),
+    }));
   }
 
   const [editingSection, setEditingSection] = useState(null);
@@ -541,6 +579,7 @@ export default function NewsJournal() {
       const urlChanged = original && (original.url || "") !== fUrl.trim();
       const updatedEntry = {
         ...original,
+        type: formType,
         date: fDate,
         url: fUrl.trim(),
         title: fTitle.trim() || "(제목 없음)",
@@ -548,6 +587,7 @@ export default function NewsJournal() {
         stockTags: fStockTags,
         techTags: fTechTags,
         summary: fSummary.trim(),
+        table: fTable,
       };
       const updated = entries.map((e) => (e.id === editingId ? updatedEntry : e));
       persist(updated);
@@ -559,6 +599,7 @@ export default function NewsJournal() {
     }
     const entry = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      type: formType,
       date: fDate,
       url: fUrl.trim(),
       title: fTitle.trim() || "(제목 없음)",
@@ -566,6 +607,7 @@ export default function NewsJournal() {
       stockTags: fStockTags,
       techTags: fTechTags,
       summary: fSummary.trim(),
+      table: fTable,
       createdAt: Date.now(),
     };
     persist([...entries, entry]);
@@ -681,6 +723,7 @@ export default function NewsJournal() {
           --tier2: #a78bfa;
           --tier3: #64748b;
           --gold: #f2b84b;
+          --youtube: #ff3b3b;
           font-family: 'Inter', sans-serif;
           color: var(--text);
           background: var(--bg);
@@ -743,6 +786,22 @@ export default function NewsJournal() {
           background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
           box-shadow: 0 20px 50px rgba(0,0,0,0.4); min-width: 220px; animation: nj-pop-in .15s ease;
         }
+
+        .nj-type-choice-box {
+          position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+          background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.5); z-index: 55; animation: nj-pop-in .18s ease; min-width: 300px;
+        }
+        .nj-type-choice-box h3 { margin: 0 0 16px; font-family: 'Space Grotesk', sans-serif; font-size: 16px; text-align: center; }
+        .nj-type-choice-row { display: flex; gap: 12px; }
+        .nj-type-choice-btn {
+          flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;
+          border: 1px solid var(--line); background: var(--surface-raised); border-radius: 10px; padding: 18px 12px;
+          cursor: pointer; color: var(--text); font-size: 13px; font-weight: 600; transition: border-color .15s ease, transform .15s ease;
+        }
+        .nj-type-choice-btn:hover { transform: translateY(-2px); }
+        .nj-type-choice-btn.news:hover { border-color: var(--teal); color: var(--teal); }
+        .nj-type-choice-btn.youtube:hover { border-color: var(--youtube); color: var(--youtube); }
 
         .nj-rank-panel {
           background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -815,6 +874,13 @@ export default function NewsJournal() {
           padding: 14px 16px; margin-bottom: 10px; transition: border-color .15s ease;
         }
         .nj-entry:hover { border-color: rgba(45,212,191,0.35); }
+        .nj-entry.youtube { border-left: 3px solid var(--youtube); }
+        .nj-entry.youtube:hover { border-color: var(--line); border-left-color: var(--youtube); }
+        .nj-entry-badge {
+          display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700;
+          padding: 2px 7px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; width: fit-content;
+        }
+        .nj-entry-badge.youtube { background: rgba(255,59,59,0.14); color: var(--youtube); }
         .nj-entry-top { display: flex; flex-direction: column; gap: 3px; }
         .nj-entry-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-soft); }
         .nj-entry-title { font-weight: 600; font-size: 14.5px; color: var(--teal); text-decoration: none; }
@@ -932,6 +998,33 @@ export default function NewsJournal() {
           font-family: 'Inter', sans-serif; font-size: 13.5px; padding: 2px 0;
         }
         .nj-bullet-input::placeholder { color: var(--text-soft); }
+
+        .nj-add-table-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; }
+        .nj-table-editor { margin-top: 10px; }
+        .nj-edit-table { width: 100%; border-collapse: collapse; }
+        .nj-edit-table th, .nj-edit-table td {
+          border: 1px solid var(--line); padding: 4px; text-align: left;
+        }
+        .nj-edit-table th input, .nj-edit-table td input {
+          width: 100%; border: none; background: none; color: var(--text); font-size: 12.5px; padding: 4px;
+          font-family: 'Inter', sans-serif; box-sizing: border-box;
+        }
+        .nj-edit-table th input { color: var(--violet); font-weight: 700; }
+        .nj-edit-table th, .nj-edit-table td.nj-table-row-remove, .nj-edit-table th.nj-table-add-col {
+          position: relative;
+        }
+        .nj-edit-table th button, .nj-edit-table td.nj-table-row-remove button, .nj-edit-table th.nj-table-add-col button {
+          border: none; background: none; color: var(--text-soft); cursor: pointer; display: flex; align-items: center;
+          padding: 2px;
+        }
+        .nj-edit-table th button:hover, .nj-edit-table td.nj-table-row-remove button:hover { color: var(--rose); }
+        .nj-edit-table th.nj-table-add-col button:hover { color: var(--teal); }
+        .nj-edit-table td.nj-table-row-remove, .nj-edit-table th.nj-table-add-col { width: 28px; text-align: center; }
+
+        .nj-view-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+        .nj-view-table th, .nj-view-table td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+        .nj-view-table th { color: var(--violet); font-weight: 700; background: rgba(167,139,250,0.06); }
+        .nj-view-table td { color: var(--text); }
         .nj-field-gap { margin-top: 8px; }
         .nj-mini-label { font-size: 11.5px; color: var(--text-soft); margin-bottom: 4px; }
         .nj-chips-input { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -996,8 +1089,7 @@ export default function NewsJournal() {
           <button
             className="nj-newbtn"
             onClick={() => {
-              resetForm();
-              setShowForm(true);
+              setShowTypeChoice(true);
             }}
           >
             <Plus size={16} /> 새 기록
@@ -1364,8 +1456,13 @@ export default function NewsJournal() {
           </div>
         ) : (
           displayedEntries.map((e) => (
-            <div className="nj-entry" key={e.id}>
+            <div className={`nj-entry${e.type === "youtube" ? " youtube" : ""}`} key={e.id}>
               <div className="nj-entry-top">
+                {e.type === "youtube" && (
+                  <span className="nj-entry-badge youtube">
+                    <Youtube size={11} /> 유튜브
+                  </span>
+                )}
                 {e.url ? (
                   <a className="nj-entry-title" href={e.url} target="_blank" rel="noopener noreferrer">
                     {e.title} ↗
@@ -1423,6 +1520,26 @@ export default function NewsJournal() {
                   </div>
                 ))}
               </div>
+              {e.table && e.table.headers && e.table.headers.length > 0 && (
+                <table className="nj-view-table">
+                  <thead>
+                    <tr>
+                      {e.table.headers.map((h, i) => (
+                        <th key={i}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {e.table.rows.map((row, ri) => (
+                      <tr key={ri}>
+                        {row.map((cell, ci) => (
+                          <td key={ci}>{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
               <div className="nj-entry-ai-kw">
                 <div className="nj-entry-ai-kw-head">
                   <span className="nj-entry-ai-kw-label">AI 추천 키워드</span>
@@ -1489,6 +1606,45 @@ export default function NewsJournal() {
         )}
       </div>
 
+      {showTypeChoice && (
+        <div
+          className="nj-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowTypeChoice(false);
+          }}
+        >
+          <div className="nj-type-choice-box">
+            <h3>어떤 기록을 남기시나요?</h3>
+            <div className="nj-type-choice-row">
+              <button
+                className="nj-type-choice-btn news"
+                onClick={() => {
+                  resetForm();
+                  setFormType("news");
+                  setShowTypeChoice(false);
+                  setShowForm(true);
+                }}
+              >
+                <Newspaper size={22} />
+                <span>뉴스 기록</span>
+              </button>
+              <button
+                className="nj-type-choice-btn youtube"
+                onClick={() => {
+                  resetForm();
+                  setFormType("youtube");
+                  setShowTypeChoice(false);
+                  setShowForm(true);
+                }}
+              >
+                <Youtube size={22} />
+                <span>유튜브 기록</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <div
           className="nj-modal-overlay"
@@ -1504,7 +1660,7 @@ export default function NewsJournal() {
         >
           <div className="nj-modal">
             <div className="nj-modal-head">
-              <h3>{editingId ? "기록 수정" : "새 뉴스 기록"}</h3>
+              <h3>{editingId ? "기록 수정" : formType === "youtube" ? "새 유튜브 기록" : "새 뉴스 기록"}</h3>
               <button
                 onClick={() => {
                   setShowForm(false);
@@ -1517,11 +1673,11 @@ export default function NewsJournal() {
 
             <div className="nj-section">
               <div className="nj-section-label">
-                <Link2 size={13} /> 1. 뉴스 링크
+                <Link2 size={13} /> 1. {formType === "youtube" ? "유튜브 링크" : "뉴스 링크"}
               </div>
               <input
                 className="nj-input"
-                placeholder="https://..."
+                placeholder={formType === "youtube" ? "https://www.youtube.com/watch?v=..." : "https://..."}
                 value={fUrl}
                 onChange={(ev) => setFUrl(ev.target.value)}
               />
@@ -1529,7 +1685,7 @@ export default function NewsJournal() {
                 <div className="nj-mini-label">제목</div>
                 <input
                   className="nj-input"
-                  placeholder="뉴스 제목"
+                  placeholder={formType === "youtube" ? "영상 제목" : "뉴스 제목"}
                   value={fTitle}
                   onChange={(ev) => setFTitle(ev.target.value)}
                 />
@@ -1680,7 +1836,7 @@ export default function NewsJournal() {
             </div>
 
             <div className="nj-section">
-              <div className="nj-section-label">3. 뉴스 요약 (직접 작성)</div>
+              <div className="nj-section-label">3. {formType === "youtube" ? "영상 요약" : "뉴스 요약"} (직접 작성)</div>
               <div className="nj-mini-label" style={{ marginBottom: 6 }}>
                 엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요.
               </div>
@@ -1696,11 +1852,65 @@ export default function NewsJournal() {
                       value={line.text}
                       onChange={(ev) => updateLineText(line.id, ev.target.value)}
                       onKeyDown={(ev) => handleLineKeyDown(line.id, ev)}
-                      placeholder={i === 0 ? "이 뉴스를 왜 중요하다고 봤는지 적어주세요" : ""}
+                      placeholder={
+                        i === 0 ? (formType === "youtube" ? "이 영상을 왜 중요하다고 봤는지 적어주세요" : "이 뉴스를 왜 중요하다고 봤는지 적어주세요") : ""
+                      }
                     />
                   </div>
                 ))}
               </div>
+
+              {fTable ? (
+                <div className="nj-table-editor">
+                  <table className="nj-edit-table">
+                    <thead>
+                      <tr>
+                        {fTable.headers.map((h, ci) => (
+                          <th key={ci}>
+                            <input value={h} onChange={(ev) => updateTableHeader(ci, ev.target.value)} />
+                            <button title="열 삭제" onClick={() => removeTableColumn(ci)}>
+                              <X size={10} />
+                            </button>
+                          </th>
+                        ))}
+                        <th className="nj-table-add-col">
+                          <button title="열 추가" onClick={addTableColumn}>
+                            <Plus size={12} />
+                          </button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fTable.rows.map((row, ri) => (
+                        <tr key={ri}>
+                          {row.map((cell, ci) => (
+                            <td key={ci}>
+                              <input value={cell} onChange={(ev) => updateTableCell(ri, ci, ev.target.value)} />
+                            </td>
+                          ))}
+                          <td className="nj-table-row-remove">
+                            <button title="행 삭제" onClick={() => removeTableRow(ri)}>
+                              <X size={10} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="nj-section-edit-actions">
+                    <button className="nj-oneline-btn" onClick={addTableRow}>
+                      + 행 추가
+                    </button>
+                    <button className="nj-oneline-btn muted" onClick={removeTable}>
+                      표 삭제
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button className="nj-oneline-btn nj-add-table-btn" onClick={addTable}>
+                  <Table2 size={13} /> 표 추가
+                </button>
+              )}
             </div>
 
             <button className="nj-savebtn" onClick={handleSave}>
