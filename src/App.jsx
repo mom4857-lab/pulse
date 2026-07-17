@@ -866,9 +866,10 @@ export default function NewsJournal() {
     const tagsHtml = tags.length
       ? `<div style="margin-top:8px; color:#888; font-size:13px;">${tags.map((t) => "#" + escapeHtml(t)).join(" ")}</div>`
       : "";
-    const titleHtml = e.url
-      ? `<a href="${escapeHtml(e.url)}">${escapeHtml(e.title)} ↗</a>`
-      : escapeHtml(e.title);
+    const titleHtml = escapeHtml(e.title);
+    const urlLineHtml = e.url
+      ? `<div style="font-size:13px; margin-bottom:8px;"><a href="${escapeHtml(e.url)}">${escapeHtml(e.url)}</a></div>`
+      : "";
     const table = normalizeTable(e.table);
     let tableHtml = "";
     if (table && table.headers.length) {
@@ -895,7 +896,8 @@ export default function NewsJournal() {
     return (
       `<div style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #eaeaea;">` +
       `<div style="font-size:12px; color:#999; margin-bottom:4px;">${badge}${escapeHtml(e.date)}</div>` +
-      `<div style="font-size:15.5px; font-weight:700; margin-bottom:6px;">${titleHtml}</div>` +
+      `<div style="font-size:15.5px; font-weight:700; margin-bottom:4px;">${titleHtml}</div>` +
+      urlLineHtml +
       `<div style="font-size:14px; color:#333;">${bulletsHtml}</div>` +
       tableHtml +
       tagsHtml +
