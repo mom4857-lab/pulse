@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2, Bold, Underline, Palette, Square } from "lucide-react";
 import { storage } from "./storage.js";
+import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "news-journal-entries";
 const ANALYSIS_KEY = "news-journal-period-analyses";
@@ -307,6 +308,8 @@ export default function NewsJournal() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [fTable, setFTable] = useState(null);
   const listRef = useRef(null);
+  const keywordDashboardRef = useRef(null);
+  const [buildingBlogCopy, setBuildingBlogCopy] = useState(false);
   const overlayMouseDownOnBackdrop = useRef(false);
 
   // form state
@@ -850,6 +853,147 @@ export default function NewsJournal() {
   const tagCounts = getTagCounts(periodEntries, category);
   const maxCount = tagCounts.length ? tagCounts[0][1] : 1;
 
+  function entryToHtml(e) {
+    const lines = getSummaryLines(e);
+    const bulletsHtml = lines
+      .map(
+        (l) =>
+          `<div style="margin:3px 0;">${l.noMarker ? "" : "• "}${sanitizeInlineHtml(l.html)}</div>`
+      )
+      .join("");
+    const tags = [...(e.industryTags || []), ...(e.stockTags || []), ...(e.techTags || [])];
+    const tagsHtml = tags.length
+      ? `<div style="margin-top:8px; color:#888; font-size:13px;">${tags.map((t) => "#" + escapeHtml(t)).join(" ")}</div>`
+      : "";
+    const titleHtml = e.url
+      ? `<a href="${escapeHtml(e.url)}" target="_blank" style="color:#1a73e8; text-decoration:none;">${escapeHtml(e.title)} ↗</a>`
+      : escapeHtml(e.title);
+    const table = normalizeTable(e.table);
+    let tableHtml = "";
+    if (table && table.headers.length) {
+      tableHtml =
+        `<table style="border-collapse:collapse; margin-top:10px; width:100%;">` +
+        `<tr>${table.headers.map((h) => `<th style="border:1px solid #ddd; padding:6px 10px; background:#f6f6f6; text-align:left;">${escapeHtml(h)}</th>`).join("")}</tr>` +
+        table.rows
+          .map(
+            (row) =>
+              `<tr>${row
+                .map(
+                  (c) =>
+                    `<td style="border:${c.borderColor ? `2px solid ${c.borderColor}` : "1px solid #ddd"}; padding:6px 10px;">${sanitizeInlineHtml(c.html)}</td>`
+                )
+                .join("")}</tr>`
+          )
+          .join("") +
+        `</table>`;
+    }
+    const badge =
+      e.type === "youtube"
+        ? `<span style="display:inline-block; font-size:11px; font-weight:700; color:#ff3b3b; background:#ffecec; border-radius:10px; padding:1px 8px; margin-right:6px;">▶ 유튜브</span>`
+        : "";
+    return (
+      `<div style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #eaeaea;">` +
+      `<div style="font-size:12px; color:#999; margin-bottom:4px;">${badge}${escapeHtml(e.date)}</div>` +
+      `<div style="font-size:15.5px; font-weight:700; margin-bottom:6px;">${titleHtml}</div>` +
+      `<div style="font-size:14px; color:#333;">${bulletsHtml}</div>` +
+      tableHtml +
+      tagsHtml +
+      `</div>`
+    );
+  }
+
+  async function captureKeywordDashboardImage() {
+    if (!keywordDashboardRef.current) return null;
+    try {
+      const canvas = await html2canvas(keywordDashboardRef.current, {
+        backgroundColor: "#0a0d13",
+        scale: 2,
+        useCORS: true,
+      });
+      return canvas.toDataURL("image/png");
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function buildBlogHtml(imageDataUrl) {
+    const key = getPeriodKey(periodType, refDate);
+    const analysis = periodAnalyses[key];
+    const industryCounts = getTagCounts(periodEntries, "industry");
+    const stockCounts = getTagCounts(periodEntries, "stock");
+    const techCounts = getTagCounts(periodEntries, "tech");
+
+    let html = `<div style="font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#222; line-height:1.75; max-width:720px;">`;
+    html += `<h2 style="font-size:21px; margin:0 0 2px;">📅 ${escapeHtml(periodLabel(periodType, refDate))} 뉴스 노트</h2>`;
+    html += `<p style="color:#999; font-size:13px; margin-top:0;">Pulse · 시장의 맥박을 짚다</p>`;
+
+    if (analysis && (analysis.coreFlow || analysis.connections || analysis.signals)) {
+      html += `<h3 style="border-left:4px solid #2dd4bf; padding-left:10px; margin-top:26px; margin-bottom:10px;">🧠 AI 총정리</h3>`;
+      if (analysis.coreFlow) {
+        html += `<p style="margin:0 0 12px;"><b style="color:#0d9488;">핵심 흐름</b><br>${splitKoreanSentences(analysis.coreFlow)
+          .map((s) => escapeHtml(s))
+          .join("<br>")}</p>`;
+      }
+      if (analysis.connections) {
+        html += `<p style="margin:0 0 12px;"><b style="color:#7c3aed;">연결고리 및 반복 주제</b><br>${splitKoreanSentences(analysis.connections)
+          .map((s) => escapeHtml(s))
+          .join("<br>")}</p>`;
+      }
+      if (analysis.signals) {
+        html += `<p style="margin:0 0 12px;"><b style="color:#e11d48;">주목할 신호</b><br>${splitKoreanSentences(analysis.signals)
+          .map((s) => escapeHtml(s))
+          .join("<br>")}</p>`;
+      }
+      if (analysis.keywords && analysis.keywords.length) {
+        html += `<p style="margin:0 0 12px;"><b>관련 키워드</b>: ${analysis.keywords.map((k) => "#" + escapeHtml(k)).join(" ")}</p>`;
+      }
+    }
+
+    if (imageDataUrl) {
+      html += `<h3 style="border-left:4px solid #a78bfa; padding-left:10px; margin-top:26px; margin-bottom:10px;">📊 키워드 대시보드</h3>`;
+      html += `<img src="${imageDataUrl}" style="max-width:100%; border-radius:8px; margin:8px 0 20px; display:block;" />`;
+    }
+
+    html += `<h3 style="border-left:4px solid #4d9fff; padding-left:10px; margin-top:26px; margin-bottom:14px;">📰 이 기간의 기록 (${periodEntries.length}건)</h3>`;
+    html += periodEntries
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(entryToHtml)
+      .join("");
+
+    html += `<h3 style="margin-top:26px; margin-bottom:10px;">📊 이번 기간 주요 키워드</h3>`;
+    html += `<p style="margin:0 0 6px;"><b>산업군</b>: ${industryCounts.map(([t, c]) => `${escapeHtml(t)}(${c})`).join(", ") || "없음"}</p>`;
+    html += `<p style="margin:0 0 6px;"><b>종목</b>: ${stockCounts.map(([t, c]) => `${escapeHtml(t)}(${c})`).join(", ") || "없음"}</p>`;
+    html += `<p style="margin:0 0 6px;"><b>기술/제품/기타</b>: ${techCounts.map(([t, c]) => `${escapeHtml(t)}(${c})`).join(", ") || "없음"}</p>`;
+    html += `</div>`;
+    return html;
+  }
+
+  async function handleCopyBlogRich() {
+    setBuildingBlogCopy(true);
+    try {
+      const imageDataUrl = await captureKeywordDashboardImage();
+      const html = buildBlogHtml(imageDataUrl);
+      const text = buildBlogText();
+
+      if (navigator.clipboard && window.ClipboardItem) {
+        const item = new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        });
+        await navigator.clipboard.write([item]);
+        showToast("서식 있는 블로그용 콘텐츠를 복사했어요. 네이버 블로그 에디터에 붙여넣으세요.");
+      } else {
+        await navigator.clipboard.writeText(text);
+        showToast("이 브라우저는 서식 복사를 지원하지 않아 텍스트만 복사했어요.");
+      }
+    } catch (e) {
+      setManualCopyText(buildBlogText());
+    } finally {
+      setBuildingBlogCopy(false);
+    }
+  }
+
   function buildBlogText() {
     const industryCounts = getTagCounts(periodEntries, "industry");
     const stockCounts = getTagCounts(periodEntries, "stock");
@@ -883,16 +1027,6 @@ export default function NewsJournal() {
     text += `종목: ${stockCounts.map(([t, c]) => `${t}(${c})`).join(", ") || "없음"}\n`;
     text += `기술/제품/기타: ${techCounts.map(([t, c]) => `${t}(${c})`).join(", ") || "없음"}\n`;
     return text;
-  }
-
-  async function handleCopyBlog() {
-    const text = buildBlogText();
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("복사했어요. 네이버 블로그에 붙여넣으세요.");
-    } catch (e) {
-      setManualCopyText(text);
-    }
   }
 
   function handleDownloadBlog() {
@@ -1016,6 +1150,7 @@ export default function NewsJournal() {
         .nj-type-choice-btn.news:hover { border-color: var(--teal); color: var(--teal); }
         .nj-type-choice-btn.youtube:hover { border-color: var(--youtube); color: var(--youtube); }
 
+        .nj-keyword-dashboard-capture { padding: 4px; }
         .nj-rank-panel {
           background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
           padding: 16px 18px; margin-bottom: 14px;
@@ -1077,6 +1212,7 @@ export default function NewsJournal() {
           transition: border-color .15s ease;
         }
         .nj-export-row button:hover { border-color: var(--teal); }
+        .nj-export-row button:disabled { opacity: 0.5; cursor: default; border-color: var(--line); }
 
         .nj-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
         .nj-list-header h2 { font-size: 15px; margin: 0; font-family: 'Space Grotesk', sans-serif; font-weight: 600; }
@@ -1461,6 +1597,7 @@ export default function NewsJournal() {
           </div>
         )}
 
+        <div ref={keywordDashboardRef} className="nj-keyword-dashboard-capture">
         <div className="nj-rank-panel">
           <div className="nj-rank-title">TOP 10 · {categoryLabel(category)} 키워드</div>
           {tagCounts.length === 0 ? (
@@ -1544,6 +1681,7 @@ export default function NewsJournal() {
               })
             )}
           </div>
+        </div>
         </div>
 
         <div className="nj-period-analysis">
@@ -1681,8 +1819,8 @@ export default function NewsJournal() {
 
         {periodType === "week" && (
           <div className="nj-export-row">
-            <button onClick={handleCopyBlog}>
-              <Copy size={14} /> 블로그용 텍스트 복사
+            <button onClick={handleCopyBlogRich} disabled={buildingBlogCopy}>
+              <Copy size={14} /> {buildingBlogCopy ? "생성 중..." : "블로그용 서식 복사"}
             </button>
             <button onClick={handleDownloadBlog}>
               <Download size={14} /> 텍스트 파일 다운로드
