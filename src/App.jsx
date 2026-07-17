@@ -859,14 +859,16 @@ export default function NewsJournal() {
     const bulletsHtml = lines
       .map(
         (l) =>
-          `<div style="margin:3px 0;">${l.noMarker ? "" : "• "}${sanitizeInlineHtml(l.html)}</div>`
+          `<div style="margin:3px 0; color:#000; font-weight:400;">${l.noMarker ? "" : "• "}${sanitizeInlineHtml(l.html)}</div>`
       )
       .join("");
     const tags = [...(e.industryTags || []), ...(e.stockTags || []), ...(e.techTags || [])];
     const tagsHtml = tags.length
-      ? `<div style="margin-top:8px; color:#888; font-size:13px;">${tags.map((t) => "#" + escapeHtml(t)).join(" ")}</div>`
+      ? `<div style="margin-top:8px; font-size:13px;">${tags
+          .map((t) => `<b style="color:#d90000;">#${escapeHtml(t)}</b>`)
+          .join(" ")}</div>`
       : "";
-    const titleHtml = escapeHtml(e.title);
+    const titleHtml = `<b style="color:#000;">[${escapeHtml(e.title)}]</b>`;
     const urlLineHtml = e.url
       ? `<div style="font-size:13px; margin-bottom:8px;"><a href="${escapeHtml(e.url)}">${escapeHtml(e.url)}</a></div>`
       : "";
@@ -875,14 +877,14 @@ export default function NewsJournal() {
     if (table && table.headers.length) {
       tableHtml =
         `<table style="border-collapse:collapse; margin-top:10px; width:100%;">` +
-        `<tr>${table.headers.map((h) => `<th style="border:1px solid #ddd; padding:6px 10px; background:#f6f6f6; text-align:left;">${escapeHtml(h)}</th>`).join("")}</tr>` +
+        `<tr>${table.headers.map((h) => `<th style="border:1px solid #ddd; padding:6px 10px; background:#f6f6f6; text-align:left; color:#000;">${escapeHtml(h)}</th>`).join("")}</tr>` +
         table.rows
           .map(
             (row) =>
               `<tr>${row
                 .map(
                   (c) =>
-                    `<td style="border:${c.borderColor ? `2px solid ${c.borderColor}` : "1px solid #ddd"}; padding:6px 10px;">${sanitizeInlineHtml(c.html)}</td>`
+                    `<td style="border:${c.borderColor ? `2px solid ${c.borderColor}` : "1px solid #ddd"}; padding:6px 10px; color:#000; font-weight:400;">${sanitizeInlineHtml(c.html)}</td>`
                 )
                 .join("")}</tr>`
           )
@@ -895,10 +897,10 @@ export default function NewsJournal() {
         : "";
     return (
       `<div style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #eaeaea;">` +
-      `<div style="font-size:12px; color:#999; margin-bottom:4px;">${badge}${escapeHtml(e.date)}</div>` +
-      `<div style="font-size:15.5px; font-weight:700; margin-bottom:4px;">${titleHtml}</div>` +
+      `<div style="font-size:12px; color:#000; margin-bottom:4px;">${badge}${escapeHtml(e.date)}</div>` +
+      `<div style="font-size:15.5px; margin-bottom:4px;">${titleHtml}</div>` +
       urlLineHtml +
-      `<div style="font-size:14px; color:#333;">${bulletsHtml}</div>` +
+      `<div style="font-size:14px; color:#000; font-weight:400;">${bulletsHtml}</div>` +
       tableHtml +
       tagsHtml +
       `</div>`
@@ -951,43 +953,51 @@ export default function NewsJournal() {
     const stockCounts = getTagCounts(periodEntries, "stock");
     const techCounts = getTagCounts(periodEntries, "tech");
 
-    let html = `<div style="font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#222; line-height:1.75; max-width:720px;">`;
-    html += `<h2 style="font-size:21px; margin:0 0 2px;">📅 ${escapeHtml(periodLabel(periodType, refDate))} 뉴스 노트</h2>`;
-    html += `<p style="color:#999; font-size:13px; margin-top:0;">Pulse · 시장의 맥박을 짚다</p>`;
+    let html = `<div style="font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#000; line-height:1.75; max-width:720px;">`;
+    html += `<h2 style="font-size:21px; margin:0 0 2px; color:#000;">📅 ${escapeHtml(periodLabel(periodType, refDate))} 뉴스 노트</h2>`;
+    html += `<p style="color:#000; font-size:13px; margin-top:0;">Pulse · 시장의 맥박을 짚다</p>`;
 
     if (analysis && (analysis.coreFlow || analysis.connections || analysis.signals)) {
-      html += `<h3 style="border-left:4px solid #2dd4bf; padding-left:10px; margin-top:26px; margin-bottom:10px;">🧠 AI 총정리</h3>`;
+      html += `<h3 style="border-left:4px solid #2dd4bf; padding-left:10px; margin-top:26px; margin-bottom:10px; color:#000;">🧠 AI 총정리</h3>`;
       if (analysis.coreFlow) {
-        html += `<p style="margin:0 0 12px;"><b style="color:#0d9488;">핵심 흐름</b><br>${splitKoreanSentences(analysis.coreFlow)
+        html += `<p style="margin:0 0 12px; color:#000; font-weight:400;"><b style="color:#0d9488;">핵심 흐름</b><br>${splitKoreanSentences(analysis.coreFlow)
           .map((s) => escapeHtml(s))
           .join("<br>")}</p>`;
       }
       if (analysis.connections) {
-        html += `<p style="margin:0 0 12px;"><b style="color:#7c3aed;">연결고리 및 반복 주제</b><br>${splitKoreanSentences(analysis.connections)
+        html += `<p style="margin:0 0 12px; color:#000; font-weight:400;"><b style="color:#7c3aed;">연결고리 및 반복 주제</b><br>${splitKoreanSentences(analysis.connections)
           .map((s) => escapeHtml(s))
           .join("<br>")}</p>`;
       }
       if (analysis.signals) {
-        html += `<p style="margin:0 0 12px;"><b style="color:#e11d48;">주목할 신호</b><br>${splitKoreanSentences(analysis.signals)
+        html += `<p style="margin:0 0 12px; color:#000; font-weight:400;"><b style="color:#e11d48;">주목할 신호</b><br>${splitKoreanSentences(analysis.signals)
           .map((s) => escapeHtml(s))
           .join("<br>")}</p>`;
       }
       if (analysis.keywords && analysis.keywords.length) {
-        html += `<p style="margin:0 0 12px;"><b>관련 키워드</b>: ${analysis.keywords.map((k) => "#" + escapeHtml(k)).join(" ")}</p>`;
+        html += `<p style="margin:0 0 12px; color:#000;"><b style="color:#000;">관련 키워드</b>: ${analysis.keywords
+          .map((k) => `<b style="color:#d90000;">#${escapeHtml(k)}</b>`)
+          .join(" ")}</p>`;
       }
     }
 
-    html += `<h3 style="border-left:4px solid #4d9fff; padding-left:10px; margin-top:26px; margin-bottom:14px;">📰 이 기간의 기록 (${periodEntries.length}건)</h3>`;
+    html += `<h3 style="border-left:4px solid #4d9fff; padding-left:10px; margin-top:26px; margin-bottom:14px; color:#000;">📰 이 기간의 기록 (${periodEntries.length}건)</h3>`;
     html += periodEntries
       .slice()
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(entryToHtml)
       .join("");
 
-    html += `<h3 style="margin-top:26px; margin-bottom:10px;">📊 이번 기간 주요 키워드</h3>`;
-    html += `<p style="margin:0 0 6px;"><b>산업군</b>: ${industryCounts.map(([t, c]) => `${escapeHtml(t)}(${c})`).join(", ") || "없음"}</p>`;
-    html += `<p style="margin:0 0 6px;"><b>종목</b>: ${stockCounts.map(([t, c]) => `${escapeHtml(t)}(${c})`).join(", ") || "없음"}</p>`;
-    html += `<p style="margin:0 0 6px;"><b>기술/제품/기타</b>: ${techCounts.map(([t, c]) => `${escapeHtml(t)}(${c})`).join(", ") || "없음"}</p>`;
+    html += `<h3 style="margin-top:26px; margin-bottom:10px; color:#000;">📊 이번 기간 주요 키워드</h3>`;
+    html += `<p style="margin:0 0 6px; color:#000;"><b style="color:#000;">산업군</b>: ${
+      industryCounts.map(([t, c]) => `<b style="color:#d90000;">${escapeHtml(t)}(${c})</b>`).join(", ") || "없음"
+    }</p>`;
+    html += `<p style="margin:0 0 6px; color:#000;"><b style="color:#000;">종목</b>: ${
+      stockCounts.map(([t, c]) => `<b style="color:#d90000;">${escapeHtml(t)}(${c})</b>`).join(", ") || "없음"
+    }</p>`;
+    html += `<p style="margin:0 0 6px; color:#000;"><b style="color:#000;">기술/제품/기타</b>: ${
+      techCounts.map(([t, c]) => `<b style="color:#d90000;">${escapeHtml(t)}(${c})</b>`).join(", ") || "없음"
+    }</p>`;
     html += `</div>`;
     return html;
   }
