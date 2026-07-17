@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2, Bold, Underline, Palette, Square } from "lucide-react";
+import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2, Bold, Underline, Palette, Square, ImageDown } from "lucide-react";
 import { storage } from "./storage.js";
 import html2canvas from "html2canvas";
 
@@ -310,6 +310,7 @@ export default function NewsJournal() {
   const listRef = useRef(null);
   const keywordDashboardRef = useRef(null);
   const [buildingBlogCopy, setBuildingBlogCopy] = useState(false);
+  const [capturingImage, setCapturingImage] = useState(false);
   const overlayMouseDownOnBackdrop = useRef(false);
 
   // form state
@@ -866,7 +867,7 @@ export default function NewsJournal() {
       ? `<div style="margin-top:8px; color:#888; font-size:13px;">${tags.map((t) => "#" + escapeHtml(t)).join(" ")}</div>`
       : "";
     const titleHtml = e.url
-      ? `<a href="${escapeHtml(e.url)}" target="_blank" style="color:#1a73e8; text-decoration:none;">${escapeHtml(e.title)} ↗</a>`
+      ? `<a href="${escapeHtml(e.url)}">${escapeHtml(e.title)} ↗</a>`
       : escapeHtml(e.title);
     const table = normalizeTable(e.table);
     let tableHtml = "";
@@ -916,7 +917,32 @@ export default function NewsJournal() {
     }
   }
 
-  function buildBlogHtml(imageDataUrl) {
+  async function handleDownloadKeywordImage() {
+    setCapturingImage(true);
+    try {
+      const dataUrl = await captureKeywordDashboardImage();
+      if (!dataUrl) {
+        showToast("대시보드 이미지 생성에 실패했어요.");
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `Pulse_키워드대시보드_${categoryLabel(category)}_${periodLabel(periodType, refDate).replace(/\s/g, "")}.png`;
+      a.click();
+      showToast("대시보드 이미지를 저장했어요.");
+    } finally {
+      setCapturingImage(false);
+    }
+  }
+
+  // Wraps a body fragment in a full HTML document — some paste targets
+  // (blog editors, mail clients) only reliably preserve links/formatting
+  // from clipboard HTML when it's a complete document, not a bare fragment.
+  function wrapHtmlDocument(bodyHtml) {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${bodyHtml}</body></html>`;
+  }
+
+  function buildBlogHtml() {
     const key = getPeriodKey(periodType, refDate);
     const analysis = periodAnalyses[key];
     const industryCounts = getTagCounts(periodEntries, "industry");
@@ -949,11 +975,6 @@ export default function NewsJournal() {
       }
     }
 
-    if (imageDataUrl) {
-      html += `<h3 style="border-left:4px solid #a78bfa; padding-left:10px; margin-top:26px; margin-bottom:10px;">📊 키워드 대시보드</h3>`;
-      html += `<img src="${imageDataUrl}" style="max-width:100%; border-radius:8px; margin:8px 0 20px; display:block;" />`;
-    }
-
     html += `<h3 style="border-left:4px solid #4d9fff; padding-left:10px; margin-top:26px; margin-bottom:14px;">📰 이 기간의 기록 (${periodEntries.length}건)</h3>`;
     html += periodEntries
       .slice()
@@ -972,8 +993,7 @@ export default function NewsJournal() {
   async function handleCopyBlogRich() {
     setBuildingBlogCopy(true);
     try {
-      const imageDataUrl = await captureKeywordDashboardImage();
-      const html = buildBlogHtml(imageDataUrl);
+      const html = wrapHtmlDocument(buildBlogHtml());
       const text = buildBlogText();
 
       if (navigator.clipboard && window.ClipboardItem) {
@@ -1821,6 +1841,9 @@ export default function NewsJournal() {
           <div className="nj-export-row">
             <button onClick={handleCopyBlogRich} disabled={buildingBlogCopy}>
               <Copy size={14} /> {buildingBlogCopy ? "생성 중..." : "블로그용 서식 복사"}
+            </button>
+            <button onClick={handleDownloadKeywordImage} disabled={capturingImage}>
+              <ImageDown size={14} /> {capturingImage ? "생성 중..." : "대시보드 이미지 저장"}
             </button>
             <button onClick={handleDownloadBlog}>
               <Download size={14} /> 텍스트 파일 다운로드
