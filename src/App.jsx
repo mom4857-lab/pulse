@@ -769,13 +769,17 @@ export default function NewsJournal() {
   }
 
   function handleSave() {
-    const savedLines = fSummaryLines
-      .filter((l) => (l.text || "").trim())
-      .map((l) => ({
-        text: l.text.trim(),
-        html: l.html || escapeHtml(l.text.trim()),
-        noMarker: !!l.noMarker,
-      }));
+    let contentLines = fSummaryLines;
+    let trimStart = 0;
+    let trimEnd = contentLines.length;
+    while (trimStart < trimEnd && !(contentLines[trimStart].text || "").trim()) trimStart++;
+    while (trimEnd > trimStart && !(contentLines[trimEnd - 1].text || "").trim()) trimEnd--;
+    contentLines = contentLines.slice(trimStart, trimEnd);
+    const savedLines = contentLines.map((l) => ({
+      text: (l.text || "").trim(),
+      html: (l.text || "").trim() ? l.html || escapeHtml((l.text || "").trim()) : "",
+      noMarker: !!l.noMarker,
+    }));
     const fSummary = savedLines.map((l) => (l.noMarker ? NO_MARKER_PREFIX : "") + l.text).join("\n");
     if (!fTitle.trim() && !fUrl.trim()) {
       showToast("제목이나 뉴스 링크 중 하나는 입력해주세요.");
@@ -1950,7 +1954,10 @@ export default function NewsJournal() {
               <div className="nj-entry-summary">
                 {getSummaryLines(e).map((line, i) => (
                   <div className="nj-summary-line" key={i}>
-                    <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
+                    <span
+                      className="nj-summary-marker"
+                      style={{ visibility: line.noMarker || !line.text.trim() ? "hidden" : "visible" }}
+                    />
                     <span dangerouslySetInnerHTML={{ __html: sanitizeInlineHtml(line.html) }} />
                   </div>
                 ))}
@@ -2314,7 +2321,10 @@ export default function NewsJournal() {
               <div className="nj-bullet-editor">
                 {fSummaryLines.map((line, i) => (
                   <div className="nj-bullet-row" key={line.id}>
-                    <span className="nj-summary-marker" style={{ visibility: line.noMarker ? "hidden" : "visible" }} />
+                    <span
+                      className="nj-summary-marker"
+                      style={{ visibility: line.noMarker || !(line.text || "").trim() ? "hidden" : "visible" }}
+                    />
                     <div
                       ref={(el) => {
                         if (el && !el.dataset.init) {
