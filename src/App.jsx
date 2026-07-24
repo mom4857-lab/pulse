@@ -5,6 +5,7 @@ import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "news-journal-entries";
 const ANALYSIS_KEY = "news-journal-period-analyses";
+const DRAFT_KEY = "news-journal-draft";
 
 // ---------- date helpers ----------
 function startOfWeek(d) {
@@ -305,6 +306,8 @@ export default function NewsJournal() {
   const [cloudView, setCloudView] = useState("list");
   const [showTypeChoice, setShowTypeChoice] = useState(false);
   const [formType, setFormType] = useState("news");
+  const [draftAvailable, setDraftAvailable] = useState(null);
+  const draftSaveTimer = useRef(null);
   const [typeFilter, setTypeFilter] = useState("all");
   const [fTable, setFTable] = useState(null);
   const listRef = useRef(null);
@@ -346,12 +349,99 @@ export default function NewsJournal() {
       } catch (e) {
         setPeriodAnalyses({});
       }
+      try {
+        const res3 = await storage.get(DRAFT_KEY);
+        if (res3 && res3.value) {
+          const draft = JSON.parse(res3.value);
+          const hasContent =
+            draft &&
+            ((draft.fTitle || "").trim() ||
+              (draft.fUrl || "").trim() ||
+              (draft.fSummaryLines || []).some((l) => (l.text || "").trim()));
+          if (hasContent) setDraftAvailable(draft);
+        }
+      } catch (e) {
+        // no usable draft — ignore
+      }
     })();
   }, []);
 
   function showToast(msg, duration = 2600) {
     setToast(msg);
     setTimeout(() => setToast(null), duration);
+  }
+
+  function clearDraft() {
+    if (draftSaveTimer.current) {
+      clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = null;
+    }
+    storage.delete(DRAFT_KEY).catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!showForm) return;
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = setTimeout(() => {
+      const hasContent =
+        (fUrl || "").trim() ||
+        (fTitle || "").trim() ||
+        fSummaryLines.some((l) => (l.text || "").trim()) ||
+        (fTable && fTable.rows && fTable.rows.length > 0);
+      if (!hasContent) return;
+      const draft = {
+        formType,
+        editingId,
+        fUrl,
+        fTitle,
+        fDate,
+        fIndustryTags,
+        fStockTags,
+        fTechTags,
+        fSummaryLines: fSummaryLines.map(({ id, ...rest }) => rest),
+        fTable,
+        savedAt: Date.now(),
+      };
+      storage.set(DRAFT_KEY, JSON.stringify(draft)).catch(() => {});
+    }, 800);
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, formType, editingId, fUrl, fTitle, fDate, fIndustryTags, fStockTags, fTechTags, fSummaryLines, fTable]);
+
+  function restoreDraft() {
+    if (!draftAvailable) return;
+    const d = draftAvailable;
+    setFormType(d.formType === "youtube" ? "youtube" : "news");
+    setEditingId(d.editingId || null);
+    setFUrl(d.fUrl || "");
+    setFTitle(d.fTitle || "");
+    setFDate(d.fDate || todayStr());
+    setFIndustryInput("");
+    setFStockInput("");
+    setFTechInput("");
+    setFIndustryTags(d.fIndustryTags || []);
+    setFStockTags(d.fStockTags || []);
+    setFTechTags(d.fTechTags || []);
+    const restoredLines =
+      d.fSummaryLines && d.fSummaryLines.length
+        ? d.fSummaryLines.map((l) => ({ id: makeLineId(), text: l.text || "", html: l.html || "", noMarker: !!l.noMarker }))
+        : [{ id: makeLineId(), text: "", html: "", noMarker: false }];
+    setFSummaryLines(restoredLines);
+    setFocusedLineId(restoredLines[0]?.id || null);
+    setFocusedCell(null);
+    setFmtState({ bold: false, underline: false, color: null });
+    setFTable(d.fTable || null);
+    lineInputRefs.current = {};
+    cellInputRefs.current = {};
+    setDraftAvailable(null);
+    setShowForm(true);
+  }
+
+  function discardDraft() {
+    setDraftAvailable(null);
+    clearDraft();
   }
 
   async function persist(newEntries) {
@@ -810,6 +900,7 @@ export default function NewsJournal() {
       persist(updated);
       resetForm();
       setShowForm(false);
+      clearDraft();
       showToast("기록을 수정했어요.");
       if (summaryChanged || urlChanged) requestEntryKeywords(updatedEntry);
       return;
@@ -831,6 +922,7 @@ export default function NewsJournal() {
     persist([...entries, entry]);
     resetForm();
     setShowForm(false);
+    clearDraft();
     showToast("기록을 저장했어요.");
     requestEntryKeywords(entry);
   }
@@ -1139,6 +1231,21 @@ export default function NewsJournal() {
           font-family: 'Inter', sans-serif;
         }
         .nj-newbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(45,212,191,0.35); }
+
+        .nj-draft-banner {
+          display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+          background: rgba(242,184,75,0.08); border: 1px solid rgba(242,184,75,0.35); border-radius: 10px;
+          padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text);
+        }
+        .nj-draft-banner-actions { display: flex; gap: 8px; }
+        .nj-draft-restore, .nj-draft-discard {
+          border: none; border-radius: 6px; padding: 6px 12px; font-size: 12.5px; cursor: pointer;
+          font-family: 'Inter', sans-serif; font-weight: 600;
+        }
+        .nj-draft-restore { background: var(--gold); color: #1a1200; }
+        .nj-draft-restore:hover { filter: brightness(1.1); }
+        .nj-draft-discard { background: none; color: var(--text-soft); border: 1px solid var(--line); }
+        .nj-draft-discard:hover { color: var(--rose); border-color: var(--rose); }
 
         .nj-controls {
           display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
@@ -1516,6 +1623,22 @@ export default function NewsJournal() {
             <Plus size={16} /> 새 기록
           </button>
         </div>
+
+        {draftAvailable && (
+          <div className="nj-draft-banner">
+            <span>
+              작성하다 만 기록이 있어요 ({new Date(draftAvailable.savedAt).toLocaleString("ko-KR")})
+            </span>
+            <div className="nj-draft-banner-actions">
+              <button className="nj-draft-restore" onClick={restoreDraft}>
+                이어서 작성
+              </button>
+              <button className="nj-draft-discard" onClick={discardDraft}>
+                삭제
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="nj-controls">
           <div className="nj-seg">
@@ -2109,6 +2232,7 @@ export default function NewsJournal() {
             if (e.target === e.currentTarget && overlayMouseDownOnBackdrop.current) {
               setShowForm(false);
               resetForm();
+              clearDraft();
             }
           }}
         >
@@ -2119,6 +2243,7 @@ export default function NewsJournal() {
                 onClick={() => {
                   setShowForm(false);
                   resetForm();
+                  clearDraft();
                 }}
               >
                 <X size={18} />
