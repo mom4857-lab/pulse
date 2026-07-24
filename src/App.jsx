@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2, Bold, Underline, Palette, Square, ImageDown } from "lucide-react";
+import { X, Link2, Plus, Copy, Download, ChevronLeft, ChevronRight, Activity, RefreshCw, Pencil, Newspaper, Youtube, Table2, Bold, Underline, Palette, Square, ImageDown, ClipboardPaste } from "lucide-react";
 import { storage } from "./storage.js";
 import html2canvas from "html2canvas";
 
@@ -209,6 +209,58 @@ function hexToRgbString(hex) {
     b = bigint & 255;
   return `rgb(${r}, ${g}, ${b})`;
 }
+// Best-effort parser for pasted analysis notes: pulls bold standalone
+// subheadings ("**1. 제목**") as candidate bullet lines, and reads a
+// trailing "키워드" section with "- 산업: #a #b" style lines into
+// industry/stock/tech keyword buckets. Everything is heuristic — the
+// user is expected to review and tidy up the result afterward.
+function parsePastedAnalysis(raw) {
+  const cleaned = (raw || "").replace(/\[\[([^\]]+)\]\]/g, "$1");
+  const lines = cleaned.split("\n").map((l) => l.trim());
+
+  const bullets = [];
+  for (const line of lines) {
+    const m = line.match(/^\*\*(.+?)\*\*$/);
+    if (m && m[1].trim()) bullets.push(m[1].trim());
+  }
+
+  const industry = [];
+  const stock = [];
+  const tech = [];
+  let inKeywordSection = false;
+  for (const line of lines) {
+    if (!inKeywordSection && /키워드/.test(line)) {
+      inKeywordSection = true;
+      continue;
+    }
+    if (!inKeywordSection) continue;
+    const tagMatches = (line.match(/#[^\s#]+/g) || []).map((t) => t.slice(1));
+    if (!tagMatches.length) continue;
+    if (/^-?\s*산업\s*[:：]/.test(line)) industry.push(...tagMatches);
+    else if (/^-?\s*종목\s*[:：]/.test(line)) stock.push(...tagMatches);
+    else if (/^-?\s*기술/.test(line)) tech.push(...tagMatches);
+  }
+
+  return {
+    bullets,
+    industry: [...new Set(industry)],
+    stock: [...new Set(stock)],
+    tech: [...new Set(tech)],
+  };
+}
+function mergeUniqueTags(existing, incoming) {
+  const seen = new Set(existing.map((t) => t.toLowerCase()));
+  const merged = [...existing];
+  for (const t of incoming) {
+    const clean = (t || "").trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(clean);
+  }
+  return merged;
+}
 function blankTableCell() {
   return { text: "", html: "", borderColor: null };
 }
@@ -310,6 +362,8 @@ export default function NewsJournal() {
   const draftSaveTimer = useRef(null);
   const [typeFilter, setTypeFilter] = useState("all");
   const [fTable, setFTable] = useState(null);
+  const [showPasteBox, setShowPasteBox] = useState(false);
+  const [pasteText, setPasteText] = useState("");
   const listRef = useRef(null);
   const keywordDashboardRef = useRef(null);
   const [buildingBlogCopy, setBuildingBlogCopy] = useState(false);
@@ -556,6 +610,8 @@ export default function NewsJournal() {
     setFocusedCell(null);
     setFmtState({ bold: false, underline: false, color: null });
     setFTable(null);
+    setShowPasteBox(false);
+    setPasteText("");
     lineInputRefs.current = {};
     cellInputRefs.current = {};
   }
@@ -682,6 +738,28 @@ export default function NewsJournal() {
         requestAnimationFrame(() => lineInputRefs.current[targetId]?.focus());
       }
     }
+  }
+
+  function handleFillFromPaste() {
+    const parsed = parsePastedAnalysis(pasteText);
+    const totalKeywords = parsed.industry.length + parsed.stock.length + parsed.tech.length;
+    if (parsed.bullets.length === 0 && totalKeywords === 0) {
+      showToast("붙여넣은 내용에서 자동으로 채울 항목을 찾지 못했어요. 직접 입력해주세요.", 4000);
+      return;
+    }
+    if (parsed.bullets.length > 0) {
+      const existingMeaningful = fSummaryLines.filter((l) => (l.text || "").trim());
+      const newLines = parsed.bullets.map((b) => ({ id: makeLineId(), text: b, html: escapeHtml(b), noMarker: false }));
+      const combined = [...existingMeaningful, ...newLines];
+      setFSummaryLines(combined.length ? combined : [{ id: makeLineId(), text: "", html: "", noMarker: false }]);
+      setFocusedLineId(combined[combined.length - 1]?.id || null);
+    }
+    if (parsed.industry.length) setFIndustryTags((prev) => mergeUniqueTags(prev, parsed.industry));
+    if (parsed.stock.length) setFStockTags((prev) => mergeUniqueTags(prev, parsed.stock));
+    if (parsed.tech.length) setFTechTags((prev) => mergeUniqueTags(prev, parsed.tech));
+    setPasteText("");
+    setShowPasteBox(false);
+    showToast(`문장 ${parsed.bullets.length}개, 키워드 ${totalKeywords}개를 채웠어요. 확인 후 다듬어주세요.`, 5000);
   }
 
   function addChip(input, setInput, tags, setTags) {
@@ -1478,6 +1556,16 @@ export default function NewsJournal() {
         .nj-modal-head button { border: none; background: none; cursor: pointer; color: var(--text-soft); }
         .nj-section { margin-bottom: 18px; }
         .nj-section-label { font-size: 12.5px; font-weight: 700; color: var(--teal); margin-bottom: 8px; display: flex; align-items: center; gap: 5px; letter-spacing: 0.03em; text-transform: uppercase; }
+        .nj-section-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .nj-section-label-row .nj-section-label { margin-bottom: 0; }
+        .nj-paste-fill-btn {
+          display: flex; align-items: center; gap: 5px; border: 1px dashed var(--line); background: var(--surface-raised);
+          color: var(--text-soft); font-size: 11.5px; padding: 4px 9px; border-radius: 7px; cursor: pointer;
+          font-family: 'Inter', sans-serif; transition: border-color .15s ease, color .15s ease;
+        }
+        .nj-paste-fill-btn:hover { border-color: var(--teal); color: var(--teal); }
+        .nj-paste-box { margin-bottom: 10px; }
+        .nj-paste-box .nj-textarea { min-height: 130px; }
         .nj-row { display: flex; gap: 8px; }
         .nj-input, .nj-textarea, .nj-date {
           width: 100%; border: 1px solid var(--line); background: var(--surface-raised); border-radius: 8px;
@@ -2415,10 +2503,36 @@ export default function NewsJournal() {
             </div>
 
             <div className="nj-section">
-              <div className="nj-section-label">3. {formType === "youtube" ? "영상 요약" : "뉴스 요약"} (직접 작성)</div>
-              <div className="nj-mini-label" style={{ marginBottom: 6 }}>
-                엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요.
+              <div className="nj-section-label-row">
+                <div className="nj-section-label">3. {formType === "youtube" ? "영상 요약" : "뉴스 요약"} (직접 작성)</div>
+                <button className="nj-paste-fill-btn" onClick={() => setShowPasteBox((s) => !s)}>
+                  <ClipboardPaste size={12} /> 붙여넣기로 채우기
+                </button>
               </div>
+              {showPasteBox && (
+                <div className="nj-paste-box">
+                  <textarea
+                    className="nj-textarea"
+                    placeholder="분석 내용을 통째로 붙여넣으면 요약 문장과 키워드를 1차로 자동 채워드려요. 굵은 소제목(**...**)과 하단의 '- 산업: #키워드' 형식 목록이 있으면 더 잘 인식돼요. 결과는 꼭 확인 후 다듬어주세요."
+                    value={pasteText}
+                    onChange={(ev) => setPasteText(ev.target.value)}
+                  />
+                  <div className="nj-section-edit-actions">
+                    <button className="nj-oneline-btn" onClick={handleFillFromPaste}>
+                      채우기
+                    </button>
+                    <button
+                      className="nj-oneline-btn muted"
+                      onClick={() => {
+                        setShowPasteBox(false);
+                        setPasteText("");
+                      }}
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="nj-mini-label" style={{ marginBottom: 6 }}>
                 엔터를 누르면 자동으로 다음 줄이 생겨요. Alt+Enter를 누르면 그 줄의 마커가 사라져요. 텍스트를 드래그해서 선택하면 그 부분에만 서식을 넣을 수 있어요.
               </div>
